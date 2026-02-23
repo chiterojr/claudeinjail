@@ -25,7 +25,7 @@ claudeinjail profile set-default personal
 claudeinjail
 ```
 
-On the first run the Docker image will be built automatically. Subsequent runs use the cached image.
+On the first run the Docker image will be built automatically using Alpine by default. Use `-i` to choose between Alpine and Debian. Subsequent runs use the cached image. If you need to add packages or tools to the image, see [Customizing the image](#customizing-the-image).
 
 ## Usage
 
