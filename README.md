@@ -1,4 +1,4 @@
-# claudeinjail
+# Claude in Jail
 
 Run [Claude Code](https://claude.ai) CLI inside a Docker container, isolated from your host system.
 
@@ -71,7 +71,9 @@ claudeinjail profile set-default work     # Set "work" as default
 
 ## Profiles
 
-Profiles are stored in `~/.config/claudeinjail/` and each contains:
+A profile is a set of local directories that get mounted as volumes into the container, providing Claude Code with its configuration, credentials, and session data. Each profile is fully isolated, so you can have as many accounts as you want (personal, work, client projects, etc.) and switch between them without any conflicts.
+
+Profiles are stored in `~/.config/claudeinjail/`:
 
 ```
 ~/.config/claudeinjail/
@@ -84,7 +86,7 @@ Profiles are stored in `~/.config/claudeinjail/` and each contains:
     .claude.json
 ```
 
-These directories are mounted into the container at `/home/claude/.claude` and `/home/claude/.claude.json`, so Claude Code sees them as its native config.
+At runtime, the selected profile's directories are bind-mounted into the container at `/home/claude/.claude` and `/home/claude/.claude.json`, so Claude Code sees them as its native config. This means credentials persist across runs and each profile can be logged into a completely different account.
 
 ## Docker images
 
