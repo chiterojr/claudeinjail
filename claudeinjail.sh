@@ -8,7 +8,7 @@ CACHE_DIR="$HOME/.cache/claudeinjail"
 DEFAULT_FILE="$CONFIG_DIR/default"
 
 # Default image
-IMAGE_NAME="claude-code-alpine"
+IMAGE_NAME="claudeinjail-alpine"
 IMAGE_VARIANT="alpine"
 
 # ============================================================================
@@ -374,7 +374,7 @@ select_image() {
 
   case "$choice" in
     2)
-      IMAGE_NAME="claude-code-debian"
+      IMAGE_NAME="claudeinjail-debian"
       IMAGE_VARIANT="debian"
       ;;
   esac
@@ -598,7 +598,7 @@ CONTAINER_CMD=("claude")
 [[ "$SHELL_ONLY" == true ]] && echo "Starting shell in container ($IMAGE_NAME)..." && echo ""
 
 exec docker run --rm -it \
-  --name "claude-code" \
+  --name "claudeinjail" \
   -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
   -v "$WORKSPACE":/workspace \
   -v "$PROFILE_DIR/.claude":/home/claude/.claude \
