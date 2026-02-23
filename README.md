@@ -127,6 +127,13 @@ rm -rf ~/.config/claudeinjail  # profiles and settings
 rm -rf ~/.cache/claudeinjail   # cached Dockerfiles
 ```
 
+## TODO
+
+- [ ] Improve connectivity with local network services (DNS, host networking, etc.)
+- [ ] Tailscale support inside the container
+- [ ] macOS support
+- [ ] Windows support
+
 ## License
 
 MIT
