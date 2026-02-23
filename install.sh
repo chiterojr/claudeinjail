@@ -12,6 +12,29 @@ LOCAL=false
 for arg in "$@"; do
   case "$arg" in
     --local) LOCAL=true ;;
+    --help|-h)
+      cat <<'HELP'
+claudeinjail installer
+
+Installs the claudeinjail script to ~/.local/bin/claudeinjail.
+If already installed, only updates when the source has changed (SHA256 check).
+
+USAGE
+  curl -fsSL https://raw.githubusercontent.com/chiterojr/claudeinjail/main/install.sh | bash
+  ./install.sh [options]
+
+OPTIONS
+  --local       Install from the local repository instead of downloading
+                from GitHub. Expects claudeinjail.sh in the same directory
+                as install.sh.
+  --help, -h    Show this message.
+
+REQUIREMENTS
+  docker        Required to run claudeinjail.
+  curl or wget  Required for remote install (not needed with --local).
+HELP
+      exit 0
+      ;;
   esac
 done
 
