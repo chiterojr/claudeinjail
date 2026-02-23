@@ -186,6 +186,9 @@ OPTIONS
                                   Accepts a Tailscale IP or machine name.
                                   LAN access is allowed automatically.
 
+  -v, --verbose                   Show Tailscale daemon logs in the terminal.
+                                  Useful for debugging connection issues.
+
 PROFILES
   Profiles are stored in:
     ~/.config/claudeinjail/<name>/
@@ -242,8 +245,10 @@ generate_entrypoint() {
 set -e
 
 if [ "$TAILSCALE_ENABLED" = "true" ]; then
+  TS_LOG="/dev/null"
+  [ "$TS_VERBOSE" = "true" ] && TS_LOG="/var/lib/tailscale/tailscaled.log"
   echo "Starting Tailscale daemon..."
-  tailscaled --state=/var/lib/tailscale/tailscaled.state &
+  tailscaled --state=/var/lib/tailscale/tailscaled.state >"$TS_LOG" 2>&1 &
   TAILSCALED_PID=$!
 
   # Wait for tailscaled socket (up to 15 seconds)
@@ -254,6 +259,8 @@ if [ "$TAILSCALE_ENABLED" = "true" ]; then
 
   if [ ! -S /var/run/tailscale/tailscaled.sock ]; then
     echo "Error: tailscaled failed to start."
+    [ -f "$TS_LOG" ] && cat "$TS_LOG"
+    [ "$TS_LOG" = "/dev/null" ] && echo "Retry with --verbose for details."
     exit 1
   fi
 
@@ -266,6 +273,8 @@ if [ "$TAILSCALE_ENABLED" = "true" ]; then
 
   if ! tailscale status >/dev/null 2>&1; then
     echo "Error: Tailscale failed to connect."
+    [ -f "$TS_LOG" ] && cat "$TS_LOG"
+    [ "$TS_LOG" = "/dev/null" ] && echo "Retry with --verbose for details."
     kill $TAILSCALED_PID 2>/dev/null
     exit 1
   fi
@@ -641,6 +650,7 @@ SELECT_IMAGE=false
 SHELL_ONLY=false
 TAILSCALE=false
 EXIT_NODE=""
+VERBOSE=false
 COMMAND=""
 
 # Parse arguments
@@ -683,6 +693,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --exit-node=*)
       EXIT_NODE="${1#--exit-node=}"
+      ;;
+    --verbose|-v)
+      VERBOSE=true
       ;;
   esac
   shift
@@ -778,6 +791,7 @@ if [[ "$TAILSCALE" == true ]]; then
   )
 
   [[ -n "$EXIT_NODE" ]] && DOCKER_ARGS+=(-e "TS_EXIT_NODE=$EXIT_NODE")
+  [[ "$VERBOSE" == true ]] && DOCKER_ARGS+=(-e "TS_VERBOSE=true")
 
   echo "Tailscale:   enabled"
   echo "Hostname:    $(generate_ts_hostname)"

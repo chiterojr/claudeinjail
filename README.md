@@ -55,6 +55,7 @@ claudeinjail [command] [options]
 | `-s, --shell` | Open a shell in the container instead of launching Claude |
 | `-t, --tailscale` | Connect the container to your Tailscale network |
 | `--exit-node <node>` | Route all container traffic through a Tailscale exit node (requires `--tailscale`) |
+| `-v, --verbose` | Enable Tailscale daemon logging to the profile directory |
 
 ### Examples
 
@@ -163,6 +164,10 @@ claudeinjail --tailscale --exit-node=my-server
 claudeinjail -t --exit-node=100.64.0.1
 ```
 
+### Logging
+
+By default, `tailscaled` daemon output is silenced to keep the terminal clean. Use `--verbose` to enable logging — logs are written to `~/.config/claudeinjail/<profile>/tailscale/tailscaled.log`. If a connection error occurs without `--verbose`, the error message will suggest retrying with the flag.
+
 ### Usage
 
 ```bash
@@ -171,6 +176,9 @@ claudeinjail --tailscale
 
 # With an exit node
 claudeinjail --tailscale --exit-node=my-server
+
+# With verbose logging
+claudeinjail --tailscale --verbose
 
 # Combined with other flags
 claudeinjail -t -p work -s   # Tailscale + work profile + shell
