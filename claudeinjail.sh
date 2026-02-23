@@ -231,8 +231,10 @@ sanitize_name() {
 }
 
 generate_ts_hostname() {
-  local raw
-  raw="$(hostname)-$(basename "$(pwd)")"
+  local dir rand raw
+  dir="$(basename "$(pwd)")"
+  rand="$(( RANDOM % 900 + 100 ))"
+  raw="claudeinjail-${dir}-${rand}"
   raw="$(echo "$raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
   echo "${raw:0:63}"
 }
@@ -265,7 +267,7 @@ if [ "$TAILSCALE_ENABLED" = "true" ]; then
   fi
 
   # Build tailscale up args
-  TS_ARGS="--accept-routes --hostname=$TS_HOSTNAME"
+  TS_ARGS="--accept-routes --ephemeral --hostname=$TS_HOSTNAME"
   [ -n "$TS_EXIT_NODE" ] && TS_ARGS="$TS_ARGS --exit-node=$TS_EXIT_NODE --exit-node-allow-lan-access"
 
   echo "Connecting to Tailscale network..."

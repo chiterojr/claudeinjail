@@ -150,7 +150,7 @@ Each profile has its own independent Tailscale identity — the "personal" profi
 
 ### Hostname
 
-The container automatically registers on your tailnet with a hostname derived from your machine name and current directory. For example, running `claudeinjail` from `/home/user/my-project` on a machine called `laptop` registers as `laptop-my-project`. The hostname is sanitized (lowercase, alphanumeric and dashes only) and limited to 63 characters.
+The container registers on your tailnet as an ephemeral node — it disappears automatically from the Tailscale admin panel when the container stops, keeping your tailnet clean. The hostname follows the format `claudeinjail-<dirname>-<random>`, for example `claudeinjail-my-project-472`. It is sanitized (lowercase, alphanumeric and dashes only) and limited to 63 characters.
 
 ### Exit nodes
 
