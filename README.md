@@ -53,6 +53,8 @@ claudeinjail [command] [options]
 | `-i, --select-image` | Prompt to choose base image (Alpine or Debian) |
 | `-b, --build-only` | Only build the Docker image, don't start a container |
 | `-s, --shell` | Open a shell in the container instead of launching Claude |
+| `-t, --tailscale` | Connect the container to your Tailscale network |
+| `--exit-node <node>` | Route all container traffic through a Tailscale exit node (requires `--tailscale`) |
 
 ### Examples
 
@@ -67,6 +69,8 @@ claudeinjail profile create work          # Create a new profile
 claudeinjail profile list                 # List existing profiles
 claudeinjail profile delete work --confirm # Delete the "work" profile
 claudeinjail profile set-default work     # Set "work" as default
+claudeinjail --tailscale                  # Start with Tailscale connected
+claudeinjail -t --exit-node my-server     # Tailscale with exit node
 ```
 
 ## Profiles
@@ -81,9 +85,11 @@ Profiles are stored in `~/.config/claudeinjail/`:
   personal/
     .claude/           # Settings, OAuth sessions, agents
     .claude.json       # State, MCP servers, tool permissions
+    tailscale/         # Tailscale state (if --tailscale is used)
   work/
     .claude/
     .claude.json
+    tailscale/
 ```
 
 At runtime, the selected profile's directories are bind-mounted into the container at `/home/claude/.claude` and `/home/claude/.claude.json`, so Claude Code sees them as its native config. This means credentials persist across runs and each profile can be logged into a completely different account.
@@ -113,6 +119,63 @@ This writes the Dockerfile to `~/.config/claudeinjail/Dockerfile`. Edit it as ne
 rm ~/.config/claudeinjail/Dockerfile
 ```
 
+## Tailscale
+
+The `--tailscale` flag connects the container to your [Tailscale](https://tailscale.com) network (tailnet), giving Claude Code access to internal services, APIs, databases, or MCP servers on your private network.
+
+### How it works
+
+When `--tailscale` is passed, the container starts a `tailscaled` daemon before launching Claude Code. Tailscale creates a virtual network interface (TUN) inside the container to establish the VPN tunnel.
+
+This requires three extra Docker flags that are **only added when `--tailscale` is used**:
+
+| Flag | Why it's needed |
+|---|---|
+| `--cap-add=NET_ADMIN` | Allows creating and configuring network interfaces and routes inside the container |
+| `--cap-add=NET_RAW` | Allows raw socket operations needed by the Tailscale tunnel |
+| `--device=/dev/net/tun` | Provides access to the kernel TUN device for creating the VPN interface |
+
+Without `--tailscale`, none of these are added and the container runs with no extra privileges.
+
+### Host isolation
+
+The TUN interface, routes, and firewall rules created by Tailscale are **confined to the container's network namespace**. They do not appear on the host, do not modify host routes, and do not affect the host's internet connectivity. Starting and stopping the container has no side effects on the host network. It behaves like a completely separate machine on your tailnet.
+
+### Authentication
+
+On the first run, `tailscale up` prints a URL in the terminal. Open it in your browser to authorize the device. The authentication state is persisted in the profile directory (`~/.config/claudeinjail/<profile>/tailscale/`), so subsequent runs reconnect automatically without prompting.
+
+Each profile has its own independent Tailscale identity — the "personal" profile can be on one tailnet and the "work" profile on another.
+
+### Hostname
+
+The container automatically registers on your tailnet with a hostname derived from your machine name and current directory. For example, running `claudeinjail` from `/home/user/my-project` on a machine called `laptop` registers as `laptop-my-project`. The hostname is sanitized (lowercase, alphanumeric and dashes only) and limited to 63 characters.
+
+### Exit nodes
+
+Use `--exit-node` to route all container traffic through a Tailscale exit node. LAN access is preserved automatically so the container can still reach local services.
+
+```bash
+# Route all traffic through an exit node
+claudeinjail --tailscale --exit-node=my-server
+
+# Using a Tailscale IP
+claudeinjail -t --exit-node=100.64.0.1
+```
+
+### Usage
+
+```bash
+# Connect to your tailnet
+claudeinjail --tailscale
+
+# With an exit node
+claudeinjail --tailscale --exit-node=my-server
+
+# Combined with other flags
+claudeinjail -t -p work -s   # Tailscale + work profile + shell
+```
+
 ## Environment variables
 
 | Variable | Description |
@@ -131,8 +194,8 @@ rm -rf ~/.cache/claudeinjail   # cached Dockerfiles
 
 ## TODO
 
+- [x] Tailscale support inside the container
 - [ ] Improve connectivity with local network services (DNS, host networking, etc.)
-- [ ] Tailscale support inside the container
 - [ ] macOS support
 - [ ] Windows support
 

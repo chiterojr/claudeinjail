@@ -37,7 +37,9 @@ RUN apk add --no-cache \
         jq \
         zip \
         openssh-client \
-        imagemagick
+        imagemagick \
+        tailscale \
+        su-exec
 
 # Install claude-code natively as the non-root user
 USER ${USERNAME}
@@ -50,10 +52,9 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 USER root
 RUN mkdir -p /workspace && chown ${USERNAME}:${USERNAME} /workspace
 
-USER ${USERNAME}
 WORKDIR /workspace
 
-CMD ["claude"]
+CMD ["su-exec", "claude", "claude"]
 DOCKERFILE
 }
 
@@ -83,6 +84,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         imagemagick \
         whois \
         ipcalc \
+        gosu \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Tailscale
+RUN curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+        | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null \
+    && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+        | tee /etc/apt/sources.list.d/tailscale.list \
+    && apt-get update && apt-get install -y --no-install-recommends tailscale \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install claude-code natively as the non-root user
@@ -95,10 +105,9 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 USER root
 RUN mkdir -p /workspace && chown ${USERNAME}:${USERNAME} /workspace
 
-USER ${USERNAME}
 WORKDIR /workspace
 
-CMD ["claude"]
+CMD ["gosu", "claude", "claude"]
 DOCKERFILE
 }
 
@@ -166,6 +175,17 @@ OPTIONS
                                   Debian uses /bin/bash. Useful for inspecting
                                   the container, installing tools, or debugging.
 
+  -t, --tailscale                 Connect the container to your Tailscale
+                                  network (tailnet). Authentication is done
+                                  via browser on the first run; subsequent
+                                  runs reconnect automatically. State is
+                                  persisted per profile.
+
+  --exit-node <node>              Route all container traffic through a
+                                  Tailscale exit node. Requires --tailscale.
+                                  Accepts a Tailscale IP or machine name.
+                                  LAN access is allowed automatically.
+
 PROFILES
   Profiles are stored in:
     ~/.config/claudeinjail/<name>/
@@ -194,6 +214,8 @@ EXAMPLES
   claudeinjail profile delete personal      Delete the "personal" profile
   claudeinjail profile set-default work     Set "work" as default
   claudeinjail eject                        Export Dockerfile for customization
+  claudeinjail --tailscale                  Start with Tailscale connected
+  claudeinjail -t --exit-node my-server     Tailscale with exit node
 HELP
 }
 
@@ -203,6 +225,58 @@ HELP
 
 sanitize_name() {
   echo "$1" | tr -cd 'a-zA-Z0-9_-'
+}
+
+generate_ts_hostname() {
+  local raw
+  raw="$(hostname)-$(basename "$(pwd)")"
+  raw="$(echo "$raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+  echo "${raw:0:63}"
+}
+
+generate_entrypoint() {
+  local drop_privs="$1"  # "su-exec" or "gosu"
+
+  cat <<'ENTRYPOINT_HEAD'
+#!/bin/bash
+set -e
+
+if [ "$TAILSCALE_ENABLED" = "true" ]; then
+  echo "Starting Tailscale daemon..."
+  tailscaled --state=/var/lib/tailscale/tailscaled.state &
+  TAILSCALED_PID=$!
+
+  # Wait for tailscaled socket (up to 15 seconds)
+  for i in $(seq 1 30); do
+    [ -S /var/run/tailscale/tailscaled.sock ] && break
+    sleep 0.5
+  done
+
+  if [ ! -S /var/run/tailscale/tailscaled.sock ]; then
+    echo "Error: tailscaled failed to start."
+    exit 1
+  fi
+
+  # Build tailscale up args
+  TS_ARGS="--accept-routes --hostname=$TS_HOSTNAME"
+  [ -n "$TS_EXIT_NODE" ] && TS_ARGS="$TS_ARGS --exit-node=$TS_EXIT_NODE --exit-node-allow-lan-access"
+
+  echo "Connecting to Tailscale network..."
+  tailscale up $TS_ARGS
+
+  if ! tailscale status >/dev/null 2>&1; then
+    echo "Error: Tailscale failed to connect."
+    kill $TAILSCALED_PID 2>/dev/null
+    exit 1
+  fi
+
+  echo "Tailscale connected as $(tailscale ip -4 2>/dev/null || echo 'unknown')."
+  echo ""
+fi
+
+ENTRYPOINT_HEAD
+
+  echo "exec ${drop_privs} claude \"\$@\""
 }
 
 get_default_profile() {
@@ -565,6 +639,8 @@ BUILD_ONLY=false
 PROFILE=""
 SELECT_IMAGE=false
 SHELL_ONLY=false
+TAILSCALE=false
+EXIT_NODE=""
 COMMAND=""
 
 # Parse arguments
@@ -598,6 +674,16 @@ while [[ $# -gt 0 ]]; do
     --shell|-s)
       SHELL_ONLY=true
       ;;
+    --tailscale|-t)
+      TAILSCALE=true
+      ;;
+    --exit-node)
+      EXIT_NODE="$2"
+      shift
+      ;;
+    --exit-node=*)
+      EXIT_NODE="${1#--exit-node=}"
+      ;;
   esac
   shift
 done
@@ -621,6 +707,14 @@ if [[ "$COMMAND" == "profile" ]]; then
       ;;
   esac
   exit 0
+fi
+
+# Validate --exit-node requires --tailscale
+if [[ -n "$EXIT_NODE" && "$TAILSCALE" != true ]]; then
+  echo "Error: --exit-node requires --tailscale."
+  echo ""
+  echo "Usage: claudeinjail --tailscale --exit-node=<node>"
+  exit 1
 fi
 
 # Normal flow: build + run
@@ -650,15 +744,57 @@ echo "Profile:     $PROFILE"
 echo "Configs at:  $PROFILE_DIR"
 echo ""
 
-CONTAINER_CMD=("claude")
-[[ "$SHELL_ONLY" == true ]] && [[ "$IMAGE_VARIANT" == "alpine" ]] && CONTAINER_CMD=("/bin/sh")
-[[ "$SHELL_ONLY" == true ]] && [[ "$IMAGE_VARIANT" != "alpine" ]] && CONTAINER_CMD=("/bin/bash")
-[[ "$SHELL_ONLY" == true ]] && echo "Starting shell in container ($IMAGE_NAME)..." && echo ""
+# Build docker run arguments
+DOCKER_ARGS=(
+  --rm -it
+  --name "claudeinjail"
+  -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
+  -v "$(pwd)":/workspace
+  -v "$PROFILE_DIR/.claude":/home/claude/.claude
+  -v "$PROFILE_DIR/.claude.json":/home/claude/.claude.json
+)
 
-exec docker run --rm -it \
-  --name "claudeinjail" \
-  -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
-  -v "$(pwd)":/workspace \
-  -v "$PROFILE_DIR/.claude":/home/claude/.claude \
-  -v "$PROFILE_DIR/.claude.json":/home/claude/.claude.json \
-  "$IMAGE_NAME" "${CONTAINER_CMD[@]}"
+# Tailscale support
+if [[ "$TAILSCALE" == true ]]; then
+  mkdir -p "$PROFILE_DIR/tailscale"
+
+  # Generate entrypoint
+  mkdir -p "$CACHE_DIR"
+  local_drop_privs="su-exec claude"
+  [[ "$IMAGE_VARIANT" != "alpine" ]] && local_drop_privs="gosu claude"
+
+  generate_entrypoint "$local_drop_privs" > "$CACHE_DIR/entrypoint.sh"
+  chmod +x "$CACHE_DIR/entrypoint.sh"
+
+  DOCKER_ARGS+=(
+    --cap-add=NET_ADMIN
+    --cap-add=NET_RAW
+    --device=/dev/net/tun:/dev/net/tun
+    -v "$PROFILE_DIR/tailscale":/var/lib/tailscale
+    -v "$CACHE_DIR/entrypoint.sh":/entrypoint.sh:ro
+    -e TAILSCALE_ENABLED=true
+    -e "TS_HOSTNAME=$(generate_ts_hostname)"
+    --entrypoint /entrypoint.sh
+  )
+
+  [[ -n "$EXIT_NODE" ]] && DOCKER_ARGS+=(-e "TS_EXIT_NODE=$EXIT_NODE")
+
+  echo "Tailscale:   enabled"
+  echo "Hostname:    $(generate_ts_hostname)"
+  [[ -n "$EXIT_NODE" ]] && echo "Exit node:   $EXIT_NODE"
+  echo ""
+fi
+
+# Determine command
+CONTAINER_CMD=()
+if [[ "$SHELL_ONLY" == true ]]; then
+  if [[ "$IMAGE_VARIANT" == "alpine" ]]; then
+    CONTAINER_CMD=("/bin/sh")
+  else
+    CONTAINER_CMD=("/bin/bash")
+  fi
+  echo "Starting shell in container ($IMAGE_NAME)..."
+  echo ""
+fi
+
+exec docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME" "${CONTAINER_CMD[@]}"
