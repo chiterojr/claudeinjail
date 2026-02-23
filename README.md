@@ -42,6 +42,7 @@ claudeinjail [command] [options]
 | `profile list` | List all profiles |
 | `profile delete <name> --confirm` | Delete a profile (requires interactive confirmation) |
 | `profile set-default <name>` | Set the default profile |
+| `eject` | Export the Dockerfile for customization |
 | `help` | Show help message |
 
 ### Options
@@ -95,6 +96,20 @@ Two base images are supported (selectable with `-i`):
 | `claudeinjail-debian` | `debian:bookworm-slim` | Better compatibility with conventional Linux tools |
 
 Both install Claude Code via the official installer as a non-root user and include common utilities (git, curl, jq, etc.). The Dockerfiles are embedded in the `claudeinjail` script and generated at build time in `~/.cache/claudeinjail/`.
+
+## Customizing the image
+
+To add packages, tools, or runtimes to the container, eject the Dockerfile:
+
+```bash
+claudeinjail eject
+```
+
+This writes the Dockerfile to `~/.config/claudeinjail/Dockerfile`. Edit it as needed — it will be picked up automatically on the next build. To revert to the built-in Dockerfile, just delete it:
+
+```bash
+rm ~/.config/claudeinjail/Dockerfile
+```
 
 ## Environment variables
 

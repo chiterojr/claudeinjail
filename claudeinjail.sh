@@ -142,6 +142,12 @@ COMMANDS
                                   The default profile is loaded automatically
                                   when no --profile is specified.
 
+  eject                           Export the embedded Dockerfile to
+                                  ~/.config/claudeinjail/Dockerfile so you can
+                                  customize it. Prompts which base image to use
+                                  (Alpine or Debian). Once ejected, builds will
+                                  use your custom Dockerfile automatically.
+
   help                            Show this message.
 
 OPTIONS
@@ -187,6 +193,7 @@ EXAMPLES
   claudeinjail profile list                 List existing profiles
   claudeinjail profile delete personal      Delete the "personal" profile
   claudeinjail profile set-default work     Set "work" as default
+  claudeinjail eject                        Export Dockerfile for customization
 HELP
 }
 
@@ -354,6 +361,48 @@ cmd_profile_set_default() {
 }
 
 # ============================================================================
+# Eject command
+# ============================================================================
+
+cmd_eject() {
+  local dest="$CONFIG_DIR/Dockerfile"
+
+  echo ""
+  echo "Select the base image to eject."
+  echo "Alpine is smaller and lighter; Debian has better compatibility with conventional Linux tools."
+  echo ""
+  echo "  1) Alpine (alpine:3.21)  [default]"
+  echo "  2) Debian (debian:bookworm-slim)"
+  read -rp "Choose [1/2]: " choice
+
+  if [[ -f "$dest" ]]; then
+    echo ""
+    echo "A custom Dockerfile already exists at $dest"
+    read -rp "Overwrite? [y/N]: " answer
+    if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+      echo "Eject cancelled."
+      exit 0
+    fi
+  fi
+
+  mkdir -p "$CONFIG_DIR"
+
+  case "$choice" in
+    2) generate_dockerfile_debian > "$dest" ;;
+    *) generate_dockerfile_alpine > "$dest" ;;
+  esac
+
+  echo ""
+  echo "Dockerfile ejected to: $dest"
+  echo ""
+  echo "Edit it to customize your image (add packages, tools, runtimes, etc.)."
+  echo "It will be used automatically on the next build."
+  echo ""
+  echo "To revert to the embedded Dockerfile, simply delete it:"
+  echo "  rm $dest"
+}
+
+# ============================================================================
 # Image selection (optional, Alpine is the default)
 # ============================================================================
 
@@ -384,16 +433,27 @@ build_image() {
   mkdir -p "$CACHE_DIR"
 
   local dockerfile="$CACHE_DIR/Dockerfile"
-  if [[ "$IMAGE_VARIANT" == "alpine" ]]; then
-    generate_dockerfile_alpine > "$dockerfile"
+  local custom_dockerfile="$CONFIG_DIR/Dockerfile"
+
+  if [[ -f "$custom_dockerfile" ]]; then
+    IMAGE_NAME="claudeinjail-custom"
+    cp "$custom_dockerfile" "$dockerfile"
+    echo ""
+    echo "Using custom Dockerfile from $custom_dockerfile"
+    echo "Building image '$IMAGE_NAME'..."
+    echo ""
   else
-    generate_dockerfile_debian > "$dockerfile"
+    if [[ "$IMAGE_VARIANT" == "alpine" ]]; then
+      generate_dockerfile_alpine > "$dockerfile"
+    else
+      generate_dockerfile_debian > "$dockerfile"
+    fi
+    echo ""
+    echo "Building image '$IMAGE_NAME'. Docker cache ensures that"
+    echo "rebuilds with no changes are instantaneous."
+    echo ""
   fi
 
-  echo ""
-  echo "Building image '$IMAGE_NAME'. Docker cache ensures that"
-  echo "rebuilds with no changes are instantaneous."
-  echo ""
   docker build -t "$IMAGE_NAME" -f "$dockerfile" "$CACHE_DIR"
 }
 
@@ -512,6 +572,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     help|--help|-h)
       show_help
+      exit 0
+      ;;
+    eject)
+      cmd_eject
       exit 0
       ;;
     profile)
