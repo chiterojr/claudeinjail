@@ -101,7 +101,8 @@ Both install Claude Code via the official installer as a non-root user and inclu
 | Variable | Description |
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API key (optional, depends on auth method) |
-| `WORKSPACE` | Local directory mounted as `/workspace` in the container. Defaults to `./workspace` |
+
+The current directory (`pwd`) is mounted as `/workspace` inside the container. Just `cd` into your project and run `claudeinjail`.
 
 ## Uninstall
 

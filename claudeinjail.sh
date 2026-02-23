@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-WORKSPACE="${WORKSPACE:-$(pwd)/workspace}"
-
 CONFIG_DIR="$HOME/.config/claudeinjail"
 CACHE_DIR="$HOME/.cache/claudeinjail"
 DEFAULT_FILE="$CONFIG_DIR/default"
@@ -176,8 +174,6 @@ PROFILES
 ENVIRONMENT VARIABLES
   ANTHROPIC_API_KEY               Anthropic API key (optional, depends on the
                                   authentication method used).
-  WORKSPACE                       Local directory mounted as /workspace in the
-                                  container. Default: ./workspace
 
 EXAMPLES
   claudeinjail                              Start with default profile and Alpine
@@ -590,8 +586,6 @@ echo "Profile:     $PROFILE"
 echo "Configs at:  $PROFILE_DIR"
 echo ""
 
-mkdir -p "$WORKSPACE"
-
 CONTAINER_CMD=("claude")
 [[ "$SHELL_ONLY" == true ]] && [[ "$IMAGE_VARIANT" == "alpine" ]] && CONTAINER_CMD=("/bin/sh")
 [[ "$SHELL_ONLY" == true ]] && [[ "$IMAGE_VARIANT" != "alpine" ]] && CONTAINER_CMD=("/bin/bash")
@@ -600,7 +594,7 @@ CONTAINER_CMD=("claude")
 exec docker run --rm -it \
   --name "claudeinjail" \
   -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
-  -v "$WORKSPACE":/workspace \
+  -v "$(pwd)":/workspace \
   -v "$PROFILE_DIR/.claude":/home/claude/.claude \
   -v "$PROFILE_DIR/.claude.json":/home/claude/.claude.json \
   "$IMAGE_NAME" "${CONTAINER_CMD[@]}"
