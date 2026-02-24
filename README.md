@@ -25,7 +25,7 @@ claudeinjail profile set-default personal
 claudeinjail
 ```
 
-On the first run the Docker image will be built automatically using Alpine by default. Use `-i` to choose between Alpine and Debian. Subsequent runs use the cached image. If you need to add packages or tools to the image, see [Customizing the image](#customizing-the-image).
+On the first run the Docker image will be built automatically using Alpine by default. Use `-i` to choose between Alpine, Debian, Alpine+Node, or Debian+Node. Subsequent runs use the cached image. If you need to add packages or tools to the image, see [Customizing the image](#customizing-the-image).
 
 ## Usage
 
@@ -50,7 +50,7 @@ claudeinjail [command] [options]
 | Option | Description |
 |---|---|
 | `-p, --profile <name>` | Use a specific profile |
-| `-i, --select-image` | Prompt to choose base image (Alpine or Debian) |
+| `-i, --select-image` | Prompt to choose base image (Alpine, Debian, Alpine+Node, or Debian+Node) |
 | `-b, --build-only` | Only build the Docker image, don't start a container |
 | `-s, --shell` | Open a shell in the container instead of launching Claude |
 | `-t, --tailscale` | Connect the container to your Tailscale network |
@@ -97,14 +97,16 @@ At runtime, the selected profile's directories are bind-mounted into the contain
 
 ## Docker images
 
-Two base images are supported (selectable with `-i`):
+Four images are available (selectable with `-i`):
 
 | Image | Base | Notes |
 |---|---|---|
 | `claudeinjail-alpine` *(default)* | `alpine:3` | Smaller and faster to build |
 | `claudeinjail-debian` | `debian:12-slim` | Better compatibility with conventional Linux tools |
+| `claudeinjail-alpine-node` | `node:lts-alpine` | Alpine + Node.js (LTS) + Bun |
+| `claudeinjail-debian-node` | `node:lts-slim` | Debian + Node.js (LTS) + Bun |
 
-Both install Claude Code via the official installer as a non-root user and include common utilities (git, curl, jq, etc.). The Dockerfiles are embedded in the `claudeinjail` script and generated at build time in `~/.cache/claudeinjail/`.
+All images install Claude Code via the official installer as a non-root user and include common utilities (git, curl, gh, jq, etc.). The Dockerfiles are embedded in the `claudeinjail` script and generated at build time in `~/.cache/claudeinjail/`.
 
 ## Customizing the image
 
@@ -150,7 +152,7 @@ Each profile has its own independent Tailscale identity — the "personal" profi
 
 ### Hostname
 
-The container registers on your tailnet as an ephemeral node — it disappears automatically from the Tailscale admin panel when the container stops, keeping your tailnet clean. The hostname follows the format `claudeinjail-<dirname>-<random>`, for example `claudeinjail-my-project-472`. It is sanitized (lowercase, alphanumeric and dashes only) and limited to 63 characters.
+The container registers on your tailnet with a generated hostname following the format `claudeinjail-<dirname>-<random>`, for example `claudeinjail-my-project-472`. It is sanitized (lowercase, alphanumeric and dashes only) and limited to 63 characters. The node persists in your Tailscale admin panel and reconnects automatically on subsequent runs. You can remove inactive nodes manually from the admin panel if needed.
 
 ### Exit nodes
 
@@ -183,6 +185,14 @@ claudeinjail --tailscale --verbose
 # Combined with other flags
 claudeinjail -t -p work -s   # Tailscale + work profile + shell
 ```
+
+## Git and SSH
+
+The container automatically picks up your git identity and SSH keys from the host:
+
+- **Git config** — Before starting the container, `claudeinjail` resolves `user.name` and `user.email` from the current directory (respecting your `includeIf` rules, nested `.gitconfig` files, etc.) and generates a temporary `.gitconfig` mounted read-only into the container. This means the correct identity is used regardless of how complex your host git configuration is.
+
+- **SSH keys** — If `~/.ssh` exists on the host, it is mounted read-only at `/home/claude/.ssh`. This allows git operations over SSH (clone, push, pull) to work inside the container without any extra setup.
 
 ## Environment variables
 

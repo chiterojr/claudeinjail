@@ -39,6 +39,7 @@ RUN apk add --no-cache \
         openssh-client \
         imagemagick \
         iptables \
+        github-cli \
         su-exec
 
 # Install Tailscale from official static binaries (Alpine repo is outdated)
@@ -95,6 +96,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gosu \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | tee /usr/share/keyrings/githubcli-archive-keyring.gpg >/dev/null \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        | tee /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Install Tailscale
 RUN curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
         | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null \
@@ -107,6 +116,127 @@ RUN curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
 USER ${USERNAME}
 ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+# Workspace
+USER root
+RUN mkdir -p /workspace && chown ${USERNAME}:${USERNAME} /workspace
+
+WORKDIR /workspace
+
+CMD ["gosu", "claude", "claude"]
+DOCKERFILE
+}
+
+generate_dockerfile_alpine_node() {
+  cat <<'DOCKERFILE'
+FROM node:lts-alpine
+
+# Create non-root user
+ARG USERNAME=claude
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# node:lts-alpine already has a "node" user with uid 1000, remove it first
+RUN deluser --remove-home node 2>/dev/null || true \
+    && addgroup -g ${USER_GID} ${USERNAME} \
+    && adduser -u ${USER_UID} -G ${USERNAME} -s /bin/sh -D ${USERNAME}
+
+# Install system deps (libgcc + libstdc++ + ripgrep required by native installer on Alpine)
+RUN apk add --no-cache \
+        ca-certificates \
+        curl \
+        git \
+        bash \
+        libgcc \
+        libstdc++ \
+        ripgrep \
+        jq \
+        zip \
+        openssh-client \
+        imagemagick \
+        iptables \
+        github-cli \
+        su-exec
+
+# Install Tailscale from official static binaries (Alpine repo is outdated)
+RUN ARCH="$(uname -m)" \
+    && case "$ARCH" in x86_64) ARCH="amd64";; aarch64) ARCH="arm64";; esac \
+    && curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_latest_${ARCH}.tgz" \
+       | tar xz -C /tmp \
+    && cp /tmp/tailscale_*/tailscale /tmp/tailscale_*/tailscaled /usr/local/bin/ \
+    && rm -rf /tmp/tailscale_*
+
+# Install Bun and Claude Code as the non-root user
+USER ${USERNAME}
+ENV PATH="/home/${USERNAME}/.local/bin:/home/${USERNAME}/.bun/bin:${PATH}"
+ENV USE_BUILTIN_RIPGREP=0
+
+RUN curl -fsSL https://bun.sh/install | bash
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+# Workspace
+USER root
+RUN mkdir -p /workspace && chown ${USERNAME}:${USERNAME} /workspace
+
+WORKDIR /workspace
+
+CMD ["su-exec", "claude", "claude"]
+DOCKERFILE
+}
+
+generate_dockerfile_debian_node() {
+  cat <<'DOCKERFILE'
+FROM node:lts-slim
+
+# Create non-root user
+ARG USERNAME=claude
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# node:lts-slim already has a "node" user with uid 1000, remove it first
+RUN userdel -r node 2>/dev/null || true \
+    && groupadd --gid ${USER_GID} ${USERNAME} \
+    && useradd --uid ${USER_UID} --gid ${USER_GID} -m -s /bin/bash ${USERNAME}
+
+# Install system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        jq \
+        tree \
+        wget \
+        zip \
+        unzip \
+        openssh-client \
+        imagemagick \
+        whois \
+        ipcalc \
+        gosu \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | tee /usr/share/keyrings/githubcli-archive-keyring.gpg >/dev/null \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        | tee /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Tailscale
+RUN curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+        | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null \
+    && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+        | tee /etc/apt/sources.list.d/tailscale.list \
+    && apt-get update && apt-get install -y --no-install-recommends tailscale \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Bun and Claude Code as the non-root user
+USER ${USERNAME}
+ENV PATH="/home/${USERNAME}/.local/bin:/home/${USERNAME}/.bun/bin:${PATH}"
+
+RUN curl -fsSL https://bun.sh/install | bash
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # Workspace
@@ -162,7 +292,8 @@ COMMANDS
   eject                           Export the embedded Dockerfile to
                                   ~/.config/claudeinjail/Dockerfile so you can
                                   customize it. Prompts which base image to use
-                                  (Alpine or Debian). Once ejected, builds will
+                                  (Alpine, Debian, Alpine+Node, Debian+Node).
+                                  Once ejected, builds will
                                   use your custom Dockerfile automatically.
 
   help                            Show this message.
@@ -171,17 +302,17 @@ OPTIONS
   -p, --profile <name>            Use the specified profile when starting
                                   the container. The profile must already exist.
 
-  -i, --select-image              Prompt which base image to use (Alpine or
-                                  Debian). Without this flag, Alpine is the
-                                  default.
+  -i, --select-image              Prompt which base image to use (Alpine,
+                                  Debian, Alpine+Node, or Debian+Node).
+                                  Without this flag, Alpine is the default.
 
   -b, --build-only                Only build the Docker image without starting
                                   the container. Useful for preparing the image.
 
-  -s, --shell                     Open a shell in the container instead of
-                                  launching Claude. Alpine uses /bin/sh,
-                                  Debian uses /bin/bash. Useful for inspecting
-                                  the container, installing tools, or debugging.
+  -s, --shell                     Open a shell (/bin/bash) in the container
+                                  instead of launching Claude. Useful for
+                                  inspecting the container, installing tools,
+                                  or debugging.
 
   -t, --tailscale                 Connect the container to your Tailscale
                                   network (tailnet). Authentication is done
@@ -275,7 +406,7 @@ if [ "$TAILSCALE_ENABLED" = "true" ]; then
   fi
 
   # Build tailscale up args
-  TS_ARGS="--accept-routes --ephemeral --hostname=$TS_HOSTNAME"
+  TS_ARGS="--accept-routes --hostname=$TS_HOSTNAME"
   [ -n "$TS_EXIT_NODE" ] && TS_ARGS="$TS_ARGS --exit-node=$TS_EXIT_NODE --exit-node-allow-lan-access"
 
   echo "Connecting to Tailscale network..."
@@ -462,11 +593,14 @@ cmd_eject() {
 
   echo ""
   echo "Select the base image to eject."
-  echo "Alpine is smaller and lighter; Debian has better compatibility with conventional Linux tools."
+  echo "Alpine is smaller and lighter; Debian has better compatibility with"
+  echo "conventional Linux tools. The Node.js+Bun variants include both JS runtimes."
   echo ""
-  echo "  1) Alpine (alpine:3.21)  [default]"
-  echo "  2) Debian (debian:bookworm-slim)"
-  read -rp "Choose [1/2]: " choice
+  echo "  1) Alpine (alpine:3)  [default]"
+  echo "  2) Debian (debian:12-slim)"
+  echo "  3) Alpine + Node.js + Bun (node:lts-alpine)"
+  echo "  4) Debian + Node.js + Bun (node:lts-slim)"
+  read -rp "Choose [1/2/3/4]: " choice
 
   if [[ -f "$dest" ]]; then
     echo ""
@@ -482,6 +616,8 @@ cmd_eject() {
 
   case "$choice" in
     2) generate_dockerfile_debian > "$dest" ;;
+    3) generate_dockerfile_alpine_node > "$dest" ;;
+    4) generate_dockerfile_debian_node > "$dest" ;;
     *) generate_dockerfile_alpine > "$dest" ;;
   esac
 
@@ -504,16 +640,27 @@ select_image() {
 
   echo ""
   echo "Select the container base image."
-  echo "Alpine is smaller and lighter; Debian has better compatibility with conventional Linux tools."
+  echo "Alpine is smaller and lighter; Debian has better compatibility with"
+  echo "conventional Linux tools. The Node.js+Bun variants include both JS runtimes."
   echo ""
-  echo "  1) Alpine (alpine:3.21)  [default]"
-  echo "  2) Debian (debian:bookworm-slim)"
-  read -rp "Choose [1/2]: " choice
+  echo "  1) Alpine (alpine:3)  [default]"
+  echo "  2) Debian (debian:12-slim)"
+  echo "  3) Alpine + Node.js + Bun (node:lts-alpine)"
+  echo "  4) Debian + Node.js + Bun (node:lts-slim)"
+  read -rp "Choose [1/2/3/4]: " choice
 
   case "$choice" in
     2)
       IMAGE_NAME="claudeinjail-debian"
       IMAGE_VARIANT="debian"
+      ;;
+    3)
+      IMAGE_NAME="claudeinjail-alpine-node"
+      IMAGE_VARIANT="alpine-node"
+      ;;
+    4)
+      IMAGE_NAME="claudeinjail-debian-node"
+      IMAGE_VARIANT="debian-node"
       ;;
   esac
 }
@@ -536,11 +683,12 @@ build_image() {
     echo "Building image '$IMAGE_NAME'..."
     echo ""
   else
-    if [[ "$IMAGE_VARIANT" == "alpine" ]]; then
-      generate_dockerfile_alpine > "$dockerfile"
-    else
-      generate_dockerfile_debian > "$dockerfile"
-    fi
+    case "$IMAGE_VARIANT" in
+      alpine)      generate_dockerfile_alpine > "$dockerfile" ;;
+      alpine-node) generate_dockerfile_alpine_node > "$dockerfile" ;;
+      debian-node) generate_dockerfile_debian_node > "$dockerfile" ;;
+      *)           generate_dockerfile_debian > "$dockerfile" ;;
+    esac
     echo ""
     echo "Building image '$IMAGE_NAME'. Docker cache ensures that"
     echo "rebuilds with no changes are instantaneous."
@@ -767,6 +915,23 @@ echo "Profile:     $PROFILE"
 echo "Configs at:  $PROFILE_DIR"
 echo ""
 
+# Generate temporary gitconfig with resolved values from the current directory
+GITCONFIG_TMP=""
+if command -v git >/dev/null 2>&1; then
+  git_name="$(git config user.name 2>/dev/null || true)"
+  git_email="$(git config user.email 2>/dev/null || true)"
+
+  if [[ -n "$git_name" || -n "$git_email" ]]; then
+    GITCONFIG_TMP="$(mktemp /tmp/claudeinjail-gitconfig-XXXXXX)"
+    trap 'rm -f "$GITCONFIG_TMP"' EXIT
+    {
+      echo "[user]"
+      [[ -n "$git_name" ]]  && echo "    name = $git_name"
+      [[ -n "$git_email" ]] && echo "    email = $git_email"
+    } > "$GITCONFIG_TMP"
+  fi
+fi
+
 # Build docker run arguments
 DOCKER_ARGS=(
   --rm -it
@@ -777,14 +942,18 @@ DOCKER_ARGS=(
   -v "$PROFILE_DIR/.claude.json":/home/claude/.claude.json
 )
 
+# Mount git config (resolved from host) and SSH keys
+[[ -n "$GITCONFIG_TMP" ]] && DOCKER_ARGS+=(-v "$GITCONFIG_TMP":/home/claude/.gitconfig:ro)
+[[ -d "$HOME/.ssh" ]] && DOCKER_ARGS+=(-v "$HOME/.ssh":/home/claude/.ssh:ro)
+
 # Tailscale support
 if [[ "$TAILSCALE" == true ]]; then
   mkdir -p "$PROFILE_DIR/tailscale"
 
   # Generate entrypoint
   mkdir -p "$CACHE_DIR"
-  local_drop_privs="su-exec claude"
-  [[ "$IMAGE_VARIANT" != "alpine" ]] && local_drop_privs="gosu claude"
+  local_drop_privs="gosu claude"
+  [[ "$IMAGE_VARIANT" == "alpine" || "$IMAGE_VARIANT" == "alpine-node" ]] && local_drop_privs="su-exec claude"
 
   generate_entrypoint "$local_drop_privs" > "$CACHE_DIR/entrypoint.sh"
   chmod +x "$CACHE_DIR/entrypoint.sh"
@@ -812,11 +981,7 @@ fi
 # Determine command
 CONTAINER_CMD=()
 if [[ "$SHELL_ONLY" == true ]]; then
-  if [[ "$IMAGE_VARIANT" == "alpine" ]]; then
-    CONTAINER_CMD=("/bin/sh")
-  else
-    CONTAINER_CMD=("/bin/bash")
-  fi
+  CONTAINER_CMD=("/bin/bash")
   echo "Starting shell in container ($IMAGE_NAME)..."
   echo ""
 fi
