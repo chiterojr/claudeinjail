@@ -101,8 +101,8 @@ Two base images are supported (selectable with `-i`):
 
 | Image | Base | Notes |
 |---|---|---|
-| `claudeinjail-alpine` *(default)* | `alpine:3.21` | Smaller and faster to build |
-| `claudeinjail-debian` | `debian:bookworm-slim` | Better compatibility with conventional Linux tools |
+| `claudeinjail-alpine` *(default)* | `alpine:3` | Smaller and faster to build |
+| `claudeinjail-debian` | `debian:12-slim` | Better compatibility with conventional Linux tools |
 
 Both install Claude Code via the official installer as a non-root user and include common utilities (git, curl, jq, etc.). The Dockerfiles are embedded in the `claudeinjail` script and generated at build time in `~/.cache/claudeinjail/`.
 

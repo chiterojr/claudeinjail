@@ -15,7 +15,7 @@ IMAGE_VARIANT="alpine"
 
 generate_dockerfile_alpine() {
   cat <<'DOCKERFILE'
-FROM alpine:3.21
+FROM alpine:3
 
 # Create non-root user
 ARG USERNAME=claude
@@ -68,7 +68,7 @@ DOCKERFILE
 
 generate_dockerfile_debian() {
   cat <<'DOCKERFILE'
-FROM debian:bookworm-slim
+FROM debian:12-slim
 
 # Create non-root user
 ARG USERNAME=claude
