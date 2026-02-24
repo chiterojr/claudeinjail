@@ -86,11 +86,13 @@ Profiles are stored in `~/.config/claudeinjail/`:
   personal/
     .claude/           # Settings, OAuth sessions, agents
     .claude.json       # State, MCP servers, tool permissions
-    tailscale/         # Tailscale state (if --tailscale is used)
+    tailscale/
+      authkey          # Tailscale auth key (if --tailscale is used)
   work/
     .claude/
     .claude.json
     tailscale/
+      authkey
 ```
 
 At runtime, the selected profile's directories are bind-mounted into the container at `/home/claude/.claude` and `/home/claude/.claude.json`, so Claude Code sees them as its native config. This means credentials persist across runs and each profile can be logged into a completely different account.
@@ -146,13 +148,20 @@ The TUN interface, routes, and firewall rules created by Tailscale are **confine
 
 ### Authentication
 
-On the first run, `tailscale up` prints a URL in the terminal. Open it in your browser to authorize the device. The authentication state is persisted in the profile directory (`~/.config/claudeinjail/<profile>/tailscale/`), so subsequent runs reconnect automatically without prompting.
+Authentication uses a reusable auth key instead of browser-based login. Auth keys are necessary because each container registers as an independent Tailscale node — with browser auth, you would need to manually authorize every container launch. Auth keys allow multiple containers to connect simultaneously without interaction.
 
-Each profile has its own independent Tailscale identity — the "personal" profile can be on one tailnet and the "work" profile on another.
+On the first run with `--tailscale`, the script prompts you to paste an auth key. Generate one at [Tailscale Admin > Settings > Keys](https://login.tailscale.com/admin/settings/keys) with the following settings:
+
+- **Reusable**: yes — allows the same key to be used across multiple containers
+- **Ephemeral**: yes — nodes are automatically removed from your tailnet when the container stops, keeping your admin panel clean
+
+The key is saved to `~/.config/claudeinjail/<profile>/tailscale/authkey` (permissions `600`) and reused automatically on subsequent runs.
+
+Each profile has its own independent auth key — the "personal" profile can be on one tailnet and the "work" profile on another. Multiple containers can run simultaneously with `--tailscale` using the same profile, each registering as an independent ephemeral node.
 
 ### Hostname
 
-The container registers on your tailnet with a generated hostname following the format `claudeinjail-<dirname>-<random>`, for example `claudeinjail-my-project-472`. It is sanitized (lowercase, alphanumeric and dashes only) and limited to 63 characters. The node persists in your Tailscale admin panel and reconnects automatically on subsequent runs. You can remove inactive nodes manually from the admin panel if needed.
+The container registers on your tailnet with a generated hostname following the format `claudeinjail-<dirname>-<pid>`, for example `claudeinjail-my-project-12345`. The same naming pattern is used for the Docker container name and temporary files. It is sanitized (lowercase, alphanumeric and dashes only) and limited to 63 characters. Nodes are ephemeral — they disappear automatically from the Tailscale admin panel when the container stops.
 
 ### Exit nodes
 
@@ -168,7 +177,7 @@ claudeinjail -t --exit-node=100.64.0.1
 
 ### Logging
 
-By default, `tailscaled` daemon output is silenced to keep the terminal clean. Use `--verbose` to enable logging — logs are written to `~/.config/claudeinjail/<profile>/tailscale/tailscaled.log`. If a connection error occurs without `--verbose`, the error message will suggest retrying with the flag.
+By default, `tailscaled` daemon output is silenced to keep the terminal clean. Use `--verbose` to enable logging — logs are written to `/tmp/tailscaled.log` inside the container. If a connection error occurs without `--verbose`, the error message will suggest retrying with the flag.
 
 ### Usage
 

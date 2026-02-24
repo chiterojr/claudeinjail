@@ -369,11 +369,10 @@ sanitize_name() {
   echo "$1" | tr -cd 'a-zA-Z0-9_-'
 }
 
-generate_ts_hostname() {
-  local dir rand raw
+generate_instance_name() {
+  local dir raw
   dir="$(basename "$(pwd)")"
-  rand="$(( RANDOM % 900 + 100 ))"
-  raw="claudeinjail-${dir}-${rand}"
+  raw="claudeinjail-${dir}-$$"
   raw="$(echo "$raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
   echo "${raw:0:63}"
 }
@@ -387,7 +386,7 @@ set -e
 
 if [ "$TAILSCALE_ENABLED" = "true" ]; then
   TS_LOG="/dev/null"
-  [ "$TS_VERBOSE" = "true" ] && TS_LOG="/var/lib/tailscale/tailscaled.log"
+  [ "$TS_VERBOSE" = "true" ] && TS_LOG="/tmp/tailscaled.log"
   echo "Starting Tailscale daemon..."
   tailscaled --state=/var/lib/tailscale/tailscaled.state >"$TS_LOG" 2>&1 &
   TAILSCALED_PID=$!
@@ -406,7 +405,7 @@ if [ "$TAILSCALE_ENABLED" = "true" ]; then
   fi
 
   # Build tailscale up args
-  TS_ARGS="--accept-routes --hostname=$TS_HOSTNAME"
+  TS_ARGS="--accept-routes --authkey=$TS_AUTHKEY --hostname=$TS_HOSTNAME"
   [ -n "$TS_EXIT_NODE" ] && TS_ARGS="$TS_ARGS --exit-node=$TS_EXIT_NODE --exit-node-allow-lan-access"
 
   echo "Connecting to Tailscale network..."
@@ -922,7 +921,7 @@ if command -v git >/dev/null 2>&1; then
   git_email="$(git config user.email 2>/dev/null || true)"
 
   if [[ -n "$git_name" || -n "$git_email" ]]; then
-    GITCONFIG_TMP="$(mktemp /tmp/claudeinjail-gitconfig-XXXXXX)"
+    GITCONFIG_TMP="/tmp/$(generate_instance_name)-gitconfig"
     trap 'rm -f "$GITCONFIG_TMP"' EXIT
     {
       echo "[user]"
@@ -935,7 +934,7 @@ fi
 # Build docker run arguments
 DOCKER_ARGS=(
   --rm -it
-  --name "claudeinjail"
+  --name "$(generate_instance_name)"
   -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
   -v "$(pwd)":/workspace
   -v "$PROFILE_DIR/.claude":/home/claude/.claude
@@ -950,6 +949,37 @@ DOCKER_ARGS=(
 if [[ "$TAILSCALE" == true ]]; then
   mkdir -p "$PROFILE_DIR/tailscale"
 
+  # Read or prompt for auth key
+  TS_AUTHKEY_FILE="$PROFILE_DIR/tailscale/authkey"
+  if [[ -f "$TS_AUTHKEY_FILE" ]]; then
+    TS_AUTHKEY="$(tr -d '[:space:]' < "$TS_AUTHKEY_FILE")"
+  fi
+
+  if [[ -z "$TS_AUTHKEY" ]]; then
+    echo ""
+    echo "No Tailscale auth key found for profile '$PROFILE'."
+    echo ""
+    echo "Generate a reusable auth key at:"
+    echo "  https://login.tailscale.com/admin/settings/keys"
+    echo ""
+    echo "Recommended settings:"
+    echo "  - Reusable: yes"
+    echo "  - Ephemeral: yes"
+    echo ""
+    read -rp "Paste your auth key: " TS_AUTHKEY
+    TS_AUTHKEY="$(echo "$TS_AUTHKEY" | tr -d '[:space:]')"
+
+    if [[ -z "$TS_AUTHKEY" ]]; then
+      echo "Error: auth key cannot be empty."
+      exit 1
+    fi
+
+    echo "$TS_AUTHKEY" > "$TS_AUTHKEY_FILE"
+    chmod 600 "$TS_AUTHKEY_FILE"
+    echo "Auth key saved to $TS_AUTHKEY_FILE"
+    echo ""
+  fi
+
   # Generate entrypoint
   mkdir -p "$CACHE_DIR"
   local_drop_privs="gosu claude"
@@ -962,10 +992,10 @@ if [[ "$TAILSCALE" == true ]]; then
     --cap-add=NET_ADMIN
     --cap-add=NET_RAW
     --device=/dev/net/tun:/dev/net/tun
-    -v "$PROFILE_DIR/tailscale":/var/lib/tailscale
     -v "$CACHE_DIR/entrypoint.sh":/entrypoint.sh:ro
     -e TAILSCALE_ENABLED=true
-    -e "TS_HOSTNAME=$(generate_ts_hostname)"
+    -e "TS_AUTHKEY=$TS_AUTHKEY"
+    -e "TS_HOSTNAME=$(generate_instance_name)"
     --entrypoint /entrypoint.sh
   )
 
@@ -973,7 +1003,7 @@ if [[ "$TAILSCALE" == true ]]; then
   [[ "$VERBOSE" == true ]] && DOCKER_ARGS+=(-e "TS_VERBOSE=true")
 
   echo "Tailscale:   enabled"
-  echo "Hostname:    $(generate_ts_hostname)"
+  echo "Hostname:    $(generate_instance_name)"
   [[ -n "$EXIT_NODE" ]] && echo "Exit node:   $EXIT_NODE"
   echo ""
 fi
