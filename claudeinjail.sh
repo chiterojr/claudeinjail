@@ -45,7 +45,9 @@ RUN apk add --no-cache \
 RUN ARCH="$(uname -m)" \
     && case "$ARCH" in x86_64) ARCH="amd64";; aarch64) ARCH="arm64";; esac \
     && curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_latest_${ARCH}.tgz" \
-       | tar xz --strip-components=1 -C /usr/local/bin tailscale_*/tailscale tailscale_*/tailscaled
+       | tar xz -C /tmp \
+    && cp /tmp/tailscale_*/tailscale /tmp/tailscale_*/tailscaled /usr/local/bin/ \
+    && rm -rf /tmp/tailscale_*
 
 # Install claude-code natively as the non-root user
 USER ${USERNAME}
