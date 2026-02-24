@@ -2,6 +2,19 @@
 
 Run [Claude Code](https://claude.ai) CLI inside a Docker container, isolated from your host system.
 
+## Table of contents
+
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Usage](#usage)
+- [Profiles](#profiles)
+- [Docker images](#docker-images)
+- [Customizing the image](#customizing-the-image)
+- [Tailscale](#tailscale)
+- [Git and SSH](#git-and-ssh)
+- [Environment variables](#environment-variables)
+- [Uninstall](#uninstall)
+
 ## Install
 
 ```bash
