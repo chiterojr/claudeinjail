@@ -68,6 +68,7 @@ claudeinjail [command] [options]
 | `-s, --shell` | Open a shell in the container instead of launching Claude |
 | `-t, --tailscale` | Connect the container to your Tailscale network |
 | `--exit-node <node>` | Route all container traffic through a Tailscale exit node (requires `--tailscale`) |
+| `--safe` | Run with standard permission prompts (by default, Claude runs with full permissions since it's containerized) |
 | `-v, --verbose` | Enable Tailscale daemon logging to the profile directory |
 
 ### Examples
@@ -83,6 +84,7 @@ claudeinjail profile create work          # Create a new profile
 claudeinjail profile list                 # List existing profiles
 claudeinjail profile delete work --confirm # Delete the "work" profile
 claudeinjail profile set-default work     # Set "work" as default
+claudeinjail --safe                       # Start with permission prompts enabled
 claudeinjail --tailscale                  # Start with Tailscale connected
 claudeinjail -t --exit-node my-server     # Tailscale with exit node
 ```

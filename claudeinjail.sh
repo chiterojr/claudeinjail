@@ -325,6 +325,12 @@ OPTIONS
                                   Accepts a Tailscale IP or machine name.
                                   LAN access is allowed automatically.
 
+  --safe                          Run Claude Code with standard permission
+                                  prompts. By default, claudeinjail launches
+                                  with --dangerously-skip-permissions since
+                                  the container provides isolation. Use --safe
+                                  to restore normal permission checks.
+
   -v, --verbose                   Show Tailscale daemon logs in the terminal.
                                   Useful for debugging connection issues.
 
@@ -356,6 +362,7 @@ EXAMPLES
   claudeinjail profile delete personal      Delete the "personal" profile
   claudeinjail profile set-default work     Set "work" as default
   claudeinjail eject                        Export Dockerfile for customization
+  claudeinjail --safe                        Start with permission prompts enabled
   claudeinjail --tailscale                  Start with Tailscale connected
   claudeinjail -t --exit-node my-server     Tailscale with exit node
 HELP
@@ -805,6 +812,7 @@ BUILD_ONLY=false
 PROFILE=""
 SELECT_IMAGE=false
 SHELL_ONLY=false
+SAFE_MODE=false
 TAILSCALE=false
 EXIT_NODE=""
 VERBOSE=false
@@ -837,6 +845,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --select-image|-i)
       SELECT_IMAGE=true
+      ;;
+    --safe)
+      SAFE_MODE=true
       ;;
     --shell|-s)
       SHELL_ONLY=true
@@ -1008,12 +1019,30 @@ if [[ "$TAILSCALE" == true ]]; then
   echo ""
 fi
 
+# Determine privilege-dropping command based on image variant
+if [[ "$IMAGE_VARIANT" == "alpine" || "$IMAGE_VARIANT" == "alpine-node" ]]; then
+  DROP_PRIVS="su-exec"
+else
+  DROP_PRIVS="gosu"
+fi
+
 # Determine command
 CONTAINER_CMD=()
 if [[ "$SHELL_ONLY" == true ]]; then
   CONTAINER_CMD=("/bin/bash")
   echo "Starting shell in container ($IMAGE_NAME)..."
   echo ""
+elif [[ "$TAILSCALE" == true ]]; then
+  # Tailscale entrypoint handles drop_privs and claude; only pass extra args
+  if [[ "$SAFE_MODE" != true ]]; then
+    CONTAINER_CMD=("--dangerously-skip-permissions")
+  fi
+else
+  if [[ "$SAFE_MODE" == true ]]; then
+    CONTAINER_CMD=("$DROP_PRIVS" "claude" "claude")
+  else
+    CONTAINER_CMD=("$DROP_PRIVS" "claude" "claude" "--dangerously-skip-permissions")
+  fi
 fi
 
 exec docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME" "${CONTAINER_CMD[@]}"
