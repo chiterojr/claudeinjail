@@ -432,7 +432,7 @@ fi
 
 ENTRYPOINT_HEAD
 
-  echo "exec ${drop_privs} claude \"\$@\""
+  echo "exec ${drop_privs} \"\$@\""
 }
 
 get_default_profile() {
@@ -1033,9 +1033,11 @@ if [[ "$SHELL_ONLY" == true ]]; then
   echo "Starting shell in container ($IMAGE_NAME)..."
   echo ""
 elif [[ "$TAILSCALE" == true ]]; then
-  # Tailscale entrypoint handles drop_privs and claude; only pass extra args
-  if [[ "$SAFE_MODE" != true ]]; then
-    CONTAINER_CMD=("--dangerously-skip-permissions")
+  # Tailscale entrypoint handles drop_privs; pass the full target command.
+  if [[ "$SAFE_MODE" == true ]]; then
+    CONTAINER_CMD=("claude")
+  else
+    CONTAINER_CMD=("claude" "--dangerously-skip-permissions")
   fi
 else
   if [[ "$SAFE_MODE" == true ]]; then
