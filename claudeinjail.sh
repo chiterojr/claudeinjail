@@ -836,6 +836,11 @@ while [[ $# -gt 0 ]]; do
       SUBARG2="${4:-}"
       break
       ;;
+    list|ls)
+      COMMAND="profile"
+      SUBCOMMAND="list"
+      break
+      ;;
     --build-only|-b)
       BUILD_ONLY=true
       ;;
