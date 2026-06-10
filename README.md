@@ -55,7 +55,7 @@ claudeinjail [command] [options]
 | `profile list` | List all profiles |
 | `profile delete <name> --confirm` | Delete a profile (requires interactive confirmation) |
 | `profile set-default <name>` | Set the default profile |
-| `eject` | Export the Dockerfile for customization |
+| `eject [name]` | Eject a Dockerfile based on a built-in base for customization |
 | `help` | Show help message |
 
 ### Options
@@ -63,7 +63,7 @@ claudeinjail [command] [options]
 | Option | Description |
 |---|---|
 | `-p, --profile <name>` | Use a specific profile |
-| `-i, --select-image` | Prompt to choose base image (Alpine, Debian, Alpine+Node, or Debian+Node) |
+| `-i, --select-image` | Prompt to choose an image (4 built-in bases + any ejected custom images) |
 | `-b, --build-only` | Only build the Docker image, don't start a container |
 | `-s, --shell` | Open a shell in the container instead of launching Claude |
 | `-t, --tailscale` | Connect the container to your Tailscale network |
@@ -127,18 +127,32 @@ All images install Claude Code via the official installer as a non-root user and
 
 ## Customizing the image
 
-To add packages, tools, or runtimes to the container, eject the Dockerfile:
+To add packages, tools, or runtimes, eject a Dockerfile based on one of the built-in bases:
 
 ```bash
-claudeinjail eject
+claudeinjail eject              # prompts for name
+claudeinjail eject my-python    # or pass the name directly
 ```
 
-This writes the Dockerfile to `~/.config/claudeinjail/Dockerfile`. Edit it as needed — it will be picked up automatically on the next build. To revert to the built-in Dockerfile, just delete it:
+The eject command also prompts for a short description (max 60 chars) and which base image to start from. The result is stored at:
+
+```
+~/.config/claudeinjail/images/<name>/Dockerfile
+```
+
+The first line of the file is a metadata header (`# claudeinjail-description: ...`) — keep it intact so the description shows up in the `-i` picker. You can edit everything below it freely.
+
+Custom images appear alongside the four built-in bases when you run:
 
 ```bash
-rm ~/.config/claudeinjail/Dockerfile
+claudeinjail -i
 ```
 
+They are global, not per-profile: any profile can use any image. To remove a custom image, delete its directory:
+
+```bash
+rm -rf ~/.config/claudeinjail/images/<name>
+```
 ## Tailscale
 
 The `--tailscale` flag connects the container to your [Tailscale](https://tailscale.com) network (tailnet), giving Claude Code access to internal services, APIs, databases, or MCP servers on your private network.

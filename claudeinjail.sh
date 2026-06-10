@@ -4,6 +4,8 @@ set -e
 CONFIG_DIR="$HOME/.config/claudeinjail"
 CACHE_DIR="$HOME/.cache/claudeinjail"
 DEFAULT_FILE="$CONFIG_DIR/default"
+IMAGES_DIR="$CONFIG_DIR/images"
+DESC_PREFIX="# claudeinjail-description:"
 
 # Default image
 IMAGE_NAME="claudeinjail-alpine"
@@ -289,12 +291,15 @@ COMMANDS
                                   The default profile is loaded automatically
                                   when no --profile is specified.
 
-  eject                           Export the embedded Dockerfile to
-                                  ~/.config/claudeinjail/Dockerfile so you can
-                                  customize it. Prompts which base image to use
-                                  (Alpine, Debian, Alpine+Node, Debian+Node).
-                                  Once ejected, builds will
-                                  use your custom Dockerfile automatically.
+  eject [name]                    Export a Dockerfile based on one of the
+                                  built-in bases (Alpine, Debian, Alpine+Node,
+                                  Debian+Node) so you can customize it. Each
+                                  custom image is stored under:
+                                    ~/.config/claudeinjail/images/<name>/Dockerfile
+                                  Prompts for name (if omitted), short
+                                  description (max 60 chars), and base image.
+                                  Custom images appear in the 'claudeinjail -i'
+                                  picker alongside the built-in bases.
 
   help                            Show this message.
 
@@ -302,9 +307,11 @@ OPTIONS
   -p, --profile <name>            Use the specified profile when starting
                                   the container. The profile must already exist.
 
-  -i, --select-image              Prompt which base image to use (Alpine,
-                                  Debian, Alpine+Node, or Debian+Node).
-                                  Without this flag, Alpine is the default.
+  -i, --select-image              Prompt which image to use. Lists the four
+                                  built-in bases (Alpine, Debian, Alpine+Node,
+                                  Debian+Node) plus any custom images ejected
+                                  via 'claudeinjail eject'. Without this flag,
+                                  Alpine is the default.
 
   -b, --build-only                Only build the Docker image without starting
                                   the container. Useful for preparing the image.
@@ -361,7 +368,8 @@ EXAMPLES
   claudeinjail profile list                 List existing profiles
   claudeinjail profile delete personal      Delete the "personal" profile
   claudeinjail profile set-default work     Set "work" as default
-  claudeinjail eject                        Export Dockerfile for customization
+  claudeinjail eject                        Eject a Dockerfile (prompts name)
+  claudeinjail eject my-python              Eject directly with the given name
   claudeinjail --safe                        Start with permission prompts enabled
   claudeinjail --tailscale                  Start with Tailscale connected
   claudeinjail -t --exit-node my-server     Tailscale with exit node
@@ -440,8 +448,138 @@ get_default_profile() {
 }
 
 list_profiles() {
-  find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort
+  find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d -not -name images -printf '%f\n' 2>/dev/null | sort
 }
+
+# ============================================================================
+# Custom image helpers
+# ============================================================================
+
+validate_image_name() {
+  local name="$1"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9-]{1,}[a-z0-9]$ ]]
+}
+
+read_image_description() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  local first
+  first="$(head -n1 "$file")"
+  if [[ "$first" == "$DESC_PREFIX"* ]]; then
+    local desc="${first#"$DESC_PREFIX"}"
+    echo "${desc## }"
+  fi
+}
+
+list_custom_images() {
+  find "$IMAGES_DIR" -mindepth 2 -maxdepth 2 -name Dockerfile -printf '%h\n' 2>/dev/null \
+    | xargs -r -n1 basename | sort
+}
+
+detect_image_family() {
+  local variant="$1"
+  case "$variant" in
+    alpine|alpine-node) echo "alpine"; return ;;
+    debian|debian-node) echo "debian"; return ;;
+  esac
+  if [[ "$variant" == custom:* ]]; then
+    local cname="${variant#custom:}"
+    local from_line
+    from_line="$(grep -m1 -iE '^FROM[[:space:]]' "$IMAGES_DIR/$cname/Dockerfile" 2>/dev/null || true)"
+    if [[ "$from_line" == *alpine* ]]; then
+      echo "alpine"
+    else
+      echo "debian"
+    fi
+    return
+  fi
+  echo "debian"
+}
+
+variant_base_label() {
+  case "$1" in
+    alpine)      echo "Alpine (alpine:3)" ;;
+    debian)      echo "Debian (debian:12-slim)" ;;
+    alpine-node) echo "Alpine + Node.js + Bun (node:lts-alpine)" ;;
+    debian-node) echo "Debian + Node.js + Bun (node:lts-slim)" ;;
+    *)           echo "$1" ;;
+  esac
+}
+
+generate_dockerfile_for_variant() {
+  case "$1" in
+    alpine)      generate_dockerfile_alpine ;;
+    debian)      generate_dockerfile_debian ;;
+    alpine-node) generate_dockerfile_alpine_node ;;
+    debian-node) generate_dockerfile_debian_node ;;
+    *) return 1 ;;
+  esac
+}
+
+prompt_base_variant() {
+  echo "" >&2
+  echo "Select the base image." >&2
+  echo "Alpine is smaller and lighter; Debian has better compatibility with" >&2
+  echo "conventional Linux tools. The Node.js+Bun variants include both JS runtimes." >&2
+  echo "" >&2
+  echo "  1) Alpine (alpine:3)  [default]" >&2
+  echo "  2) Debian (debian:12-slim)" >&2
+  echo "  3) Alpine + Node.js + Bun (node:lts-alpine)" >&2
+  echo "  4) Debian + Node.js + Bun (node:lts-slim)" >&2
+  read -rp "Choose [1/2/3/4]: " choice
+  case "$choice" in
+    2) echo "debian" ;;
+    3) echo "alpine-node" ;;
+    4) echo "debian-node" ;;
+    *) echo "alpine" ;;
+  esac
+}
+
+prompt_image_name() {
+  local name
+  while true; do
+    read -rp "Image name (lowercase, digits, hyphens; min 3 chars): " name
+    name="$(echo "$name" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    if validate_image_name "$name"; then
+      if [[ -f "$IMAGES_DIR/$name/Dockerfile" ]]; then
+        echo "An image named '$name' already exists at $IMAGES_DIR/$name/" >&2
+        read -rp "Overwrite? [y/N]: " ans
+        [[ "$ans" == "y" || "$ans" == "Y" ]] || continue
+      fi
+      echo "$name"
+      return 0
+    fi
+    echo "Invalid name. Use only [a-z0-9-], no leading/trailing hyphen, min 3 chars." >&2
+  done
+}
+
+prompt_image_description() {
+  local desc
+  while true; do
+    read -rp "Short description (max 60 chars, may be empty): " desc
+    desc="$(echo "$desc" | tr -d '\n\r' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+    if [[ ${#desc} -le 60 ]]; then
+      echo "$desc"
+      return 0
+    fi
+    echo "Description too long (${#desc} chars). Limit is 60." >&2
+  done
+}
+
+write_custom_image() {
+  local name="$1" variant="$2" desc="$3"
+  local dir="$IMAGES_DIR/$name"
+  mkdir -p "$dir"
+  {
+    if [[ -n "$desc" ]]; then
+      echo "$DESC_PREFIX $desc"
+    else
+      echo "$DESC_PREFIX"
+    fi
+    generate_dockerfile_for_variant "$variant"
+  } > "$dir/Dockerfile"
+}
+
 
 # ============================================================================
 # Profile commands
@@ -456,6 +594,11 @@ cmd_profile_create() {
     echo "Use only letters, numbers, hyphens, and underscores."
     echo ""
     echo "Usage: claudeinjail profile create <name>"
+    exit 1
+  fi
+
+  if [[ "$name" == "images" ]]; then
+    echo "Error: 'images' is a reserved name (used for custom images)."
     exit 1
   fi
 
@@ -595,46 +738,58 @@ cmd_profile_set_default() {
 # ============================================================================
 
 cmd_eject() {
-  local dest="$CONFIG_DIR/Dockerfile"
+  local name="$1"
 
-  echo ""
-  echo "Select the base image to eject."
-  echo "Alpine is smaller and lighter; Debian has better compatibility with"
-  echo "conventional Linux tools. The Node.js+Bun variants include both JS runtimes."
-  echo ""
-  echo "  1) Alpine (alpine:3)  [default]"
-  echo "  2) Debian (debian:12-slim)"
-  echo "  3) Alpine + Node.js + Bun (node:lts-alpine)"
-  echo "  4) Debian + Node.js + Bun (node:lts-slim)"
-  read -rp "Choose [1/2/3/4]: " choice
+  mkdir -p "$IMAGES_DIR"
 
-  if [[ -f "$dest" ]]; then
-    echo ""
-    echo "A custom Dockerfile already exists at $dest"
-    read -rp "Overwrite? [y/N]: " answer
-    if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
-      echo "Eject cancelled."
-      exit 0
+  if [[ -n "$name" ]]; then
+    name="$(echo "$name" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    if ! validate_image_name "$name"; then
+      echo "Error: invalid image name '$name'."
+      echo "Use only [a-z0-9-], no leading/trailing hyphen, min 3 chars."
+      exit 1
     fi
+    if [[ -f "$IMAGES_DIR/$name/Dockerfile" ]]; then
+      echo "An image named '$name' already exists at $IMAGES_DIR/$name/"
+      read -rp "Overwrite? [y/N]: " ans
+      if [[ "$ans" != "y" && "$ans" != "Y" ]]; then
+        echo "Eject cancelled."
+        exit 0
+      fi
+    fi
+  else
+    name="$(prompt_image_name)"
   fi
 
-  mkdir -p "$CONFIG_DIR"
+  local desc
+  desc="$(prompt_image_description)"
 
-  case "$choice" in
-    2) generate_dockerfile_debian > "$dest" ;;
-    3) generate_dockerfile_alpine_node > "$dest" ;;
-    4) generate_dockerfile_debian_node > "$dest" ;;
-    *) generate_dockerfile_alpine > "$dest" ;;
-  esac
+  local variant
+  variant="$(prompt_base_variant)"
 
+  write_custom_image "$name" "$variant" "$desc"
+
+  local dockerfile="$IMAGES_DIR/$name/Dockerfile"
   echo ""
-  echo "Dockerfile ejected to: $dest"
+  echo "Image '$name' ejected."
   echo ""
-  echo "Edit it to customize your image (add packages, tools, runtimes, etc.)."
-  echo "It will be used automatically on the next build."
+  echo "Dockerfile location:"
+  echo "  $dockerfile"
   echo ""
-  echo "To revert to the embedded Dockerfile, simply delete it:"
-  echo "  rm $dest"
+  echo "Base: $(variant_base_label "$variant")"
+  [[ -n "$desc" ]] && echo "Description: $desc"
+  echo ""
+  echo "You can edit this Dockerfile freely — add packages, tools, runtimes, etc."
+  echo ""
+  echo "IMPORTANT: keep the first line ('$DESC_PREFIX ...') intact."
+  echo "It is parsed by 'claudeinjail -i' to show the image description."
+  echo "If you remove it, the image still works but loses its description label."
+  echo ""
+  echo "To use this image on the next run, pick it via:"
+  echo "  claudeinjail -i"
+  echo ""
+  echo "To remove this image, delete its directory:"
+  echo "  rm -rf $IMAGES_DIR/$name"
 }
 
 # ============================================================================
@@ -644,16 +799,41 @@ cmd_eject() {
 select_image() {
   [[ "$SELECT_IMAGE" == true ]] || return 0
 
+  mapfile -t customs < <(list_custom_images)
+
   echo ""
-  echo "Select the container base image."
-  echo "Alpine is smaller and lighter; Debian has better compatibility with"
-  echo "conventional Linux tools. The Node.js+Bun variants include both JS runtimes."
+  echo "Select the container image."
+  echo "Built-in bases ship with Claude Code preinstalled. Custom images are"
+  echo "previously ejected Dockerfiles you have customized."
   echo ""
   echo "  1) Alpine (alpine:3)  [default]"
   echo "  2) Debian (debian:12-slim)"
   echo "  3) Alpine + Node.js + Bun (node:lts-alpine)"
   echo "  4) Debian + Node.js + Bun (node:lts-slim)"
-  read -rp "Choose [1/2/3/4]: " choice
+
+  local i=5
+  local -a idx_to_name=()
+  for name in "${customs[@]}"; do
+    local desc
+    desc="$(read_image_description "$IMAGES_DIR/$name/Dockerfile")"
+    if [[ -n "$desc" ]]; then
+      echo "  $i) custom: $name — $desc"
+    else
+      echo "  $i) custom: $name"
+    fi
+    idx_to_name+=("$name")
+    i=$((i+1))
+  done
+
+  local last=$((i-1))
+  read -rp "Choose [1-$last]: " choice
+
+  if [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 5 && "$choice" -le "$last" ]]; then
+    local picked="${idx_to_name[$((choice-5))]}"
+    IMAGE_NAME="claudeinjail-custom-$picked"
+    IMAGE_VARIANT="custom:$picked"
+    return
+  fi
 
   case "$choice" in
     2)
@@ -668,6 +848,10 @@ select_image() {
       IMAGE_NAME="claudeinjail-debian-node"
       IMAGE_VARIANT="debian-node"
       ;;
+    *)
+      IMAGE_NAME="claudeinjail-alpine"
+      IMAGE_VARIANT="alpine"
+      ;;
   esac
 }
 
@@ -677,15 +861,18 @@ select_image() {
 
 build_image() {
   mkdir -p "$CACHE_DIR"
-
   local dockerfile="$CACHE_DIR/Dockerfile"
-  local custom_dockerfile="$CONFIG_DIR/Dockerfile"
 
-  if [[ -f "$custom_dockerfile" ]]; then
-    IMAGE_NAME="claudeinjail-custom"
-    cp "$custom_dockerfile" "$dockerfile"
+  if [[ "$IMAGE_VARIANT" == custom:* ]]; then
+    local cname="${IMAGE_VARIANT#custom:}"
+    local src="$IMAGES_DIR/$cname/Dockerfile"
+    if [[ ! -f "$src" ]]; then
+      echo "Error: custom image '$cname' not found at $src"
+      exit 1
+    fi
+    cp "$src" "$dockerfile"
     echo ""
-    echo "Using custom Dockerfile from $custom_dockerfile"
+    echo "Using custom image '$cname' from $src"
     echo "Building image '$IMAGE_NAME'..."
     echo ""
   else
@@ -693,7 +880,8 @@ build_image() {
       alpine)      generate_dockerfile_alpine > "$dockerfile" ;;
       alpine-node) generate_dockerfile_alpine_node > "$dockerfile" ;;
       debian-node) generate_dockerfile_debian_node > "$dockerfile" ;;
-      *)           generate_dockerfile_debian > "$dockerfile" ;;
+      debian)      generate_dockerfile_debian > "$dockerfile" ;;
+      *)           generate_dockerfile_alpine > "$dockerfile" ;;
     esac
     echo ""
     echo "Building image '$IMAGE_NAME'. Docker cache ensures that"
@@ -826,7 +1014,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     eject)
-      cmd_eject
+      cmd_eject "${2:-}"
       exit 0
       ;;
     profile)
@@ -999,7 +1187,7 @@ if [[ "$TAILSCALE" == true ]]; then
   # Generate entrypoint
   mkdir -p "$CACHE_DIR"
   local_drop_privs="gosu claude"
-  [[ "$IMAGE_VARIANT" == "alpine" || "$IMAGE_VARIANT" == "alpine-node" ]] && local_drop_privs="su-exec claude"
+  [[ "$(detect_image_family "$IMAGE_VARIANT")" == "alpine" ]] && local_drop_privs="su-exec claude"
 
   generate_entrypoint "$local_drop_privs" > "$CACHE_DIR/entrypoint.sh"
   chmod +x "$CACHE_DIR/entrypoint.sh"
@@ -1024,8 +1212,8 @@ if [[ "$TAILSCALE" == true ]]; then
   echo ""
 fi
 
-# Determine privilege-dropping command based on image variant
-if [[ "$IMAGE_VARIANT" == "alpine" || "$IMAGE_VARIANT" == "alpine-node" ]]; then
+# Determine privilege-dropping command based on image family
+if [[ "$(detect_image_family "$IMAGE_VARIANT")" == "alpine" ]]; then
   DROP_PRIVS="su-exec"
 else
   DROP_PRIVS="gosu"
