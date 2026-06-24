@@ -7,6 +7,7 @@ Run [Claude Code](https://claude.ai) CLI inside a Docker container, isolated fro
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Usage](#usage)
+  - [Interactive mode](#interactive-mode)
 - [Profiles](#profiles)
 - [Docker images](#docker-images)
 - [Customizing the image](#customizing-the-image)
@@ -62,6 +63,7 @@ claudeinjail [command] [options]
 
 | Option | Description |
 |---|---|
+| `-w, --wizard` | Interactive mode: ask everything through guided prompts (profile, image, Tailscale) instead of remembering individual flags |
 | `-p, --profile <name>` | Use a specific profile |
 | `-i, --select-image` | Prompt to choose an image (4 built-in bases + any ejected custom images) |
 | `-b, --build-only` | Only build the Docker image, don't start a container |
@@ -75,6 +77,7 @@ claudeinjail [command] [options]
 
 ```bash
 claudeinjail                              # Start with default profile (Alpine)
+claudeinjail -w                           # Interactive wizard (asks everything)
 claudeinjail -p work                      # Start with the "work" profile
 claudeinjail -i                           # Choose base image interactively
 claudeinjail -b                           # Build image only
@@ -88,6 +91,18 @@ claudeinjail --safe                       # Start with permission prompts enable
 claudeinjail --tailscale                  # Start with Tailscale connected
 claudeinjail -t --exit-node my-server     # Tailscale with exit node
 ```
+
+### Interactive mode
+
+If you'd rather not remember the individual flags, run `claudeinjail -w` (or
+`--wizard`). It walks you through guided prompts and asks for everything:
+
+- **Profile** — pick an existing one or create a new profile on the spot.
+- **Image** — choose a base (Alpine, Debian, ±Node) or a custom ejected image.
+- **Tailscale** — connect to your tailnet and, optionally, pick an exit node.
+
+Any explicit flag you also pass takes precedence over the matching prompt, so
+`claudeinjail -w -p work` skips the profile question and uses `work` directly.
 
 ## Profiles
 

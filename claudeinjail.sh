@@ -304,6 +304,12 @@ COMMANDS
   help                            Show this message.
 
 OPTIONS
+  -w, --wizard                    Interactive mode. Asks everything through
+                                  guided prompts (profile, image, and
+                                  Tailscale) so you don't have to remember the
+                                  individual flags. Explicit flags still work
+                                  and override what the wizard would ask.
+
   -p, --profile <name>            Use the specified profile when starting
                                   the container. The profile must already exist.
 
@@ -358,6 +364,7 @@ ENVIRONMENT VARIABLES
 
 EXAMPLES
   claudeinjail                              Start with default profile and Alpine
+  claudeinjail -w                           Interactive wizard (asks everything)
   claudeinjail -p work                      Start with the "work" profile
   claudeinjail -i                           Prompt which image to use
   claudeinjail -b                           Only build the Alpine image
@@ -992,6 +999,115 @@ validate_profile() {
 }
 
 # ============================================================================
+# Wizard (interactive mode: -w / --wizard)
+# ============================================================================
+#
+# A single flag that asks everything interactively, so you don't have to
+# remember the individual flags. To add a new question, write a wizard_*
+# helper that sets the relevant state variable and add a line for it to the
+# ordered list in run_wizard() below.
+
+wizard_create_profile() {
+  local name
+  while true; do
+    read -rp "New profile name: " name
+    name="$(sanitize_name "$name")"
+    if [[ -z "$name" ]]; then
+      echo "Invalid name. Use only letters, numbers, hyphens, and underscores." >&2
+      continue
+    fi
+    if [[ "$name" == "images" ]]; then
+      echo "'images' is a reserved name (used for custom images)." >&2
+      continue
+    fi
+    break
+  done
+
+  if [[ ! -d "$CONFIG_DIR/$name" ]]; then
+    mkdir -p "$CONFIG_DIR/$name/.claude"
+    echo '{}' > "$CONFIG_DIR/$name/.claude.json"
+    echo "Profile '$name' created."
+  fi
+  PROFILE="$name"
+}
+
+wizard_pick_profile() {
+  # Respect an explicit -p/--profile.
+  [[ -n "$PROFILE" ]] && return 0
+
+  mkdir -p "$CONFIG_DIR"
+  local default_name
+  default_name="$(get_default_profile)"
+  local -a profiles=()
+  mapfile -t profiles < <(list_profiles)
+
+  echo ""
+  echo "Profile — which account/credentials to use."
+  echo ""
+
+  if [[ ${#profiles[@]} -eq 0 ]]; then
+    echo "No profiles found — let's create your first one."
+    wizard_create_profile
+    return
+  fi
+
+  while true; do
+    local i
+    for i in "${!profiles[@]}"; do
+      if [[ "${profiles[$i]}" == "$default_name" ]]; then
+        echo "  $((i+1))) ${profiles[$i]}  (default)"
+      else
+        echo "  $((i+1))) ${profiles[$i]}"
+      fi
+    done
+    echo "  n) Create new profile"
+    read -rp "Choose [${default_name:-1}]: " choice
+
+    if [[ -z "$choice" ]]; then
+      if [[ -n "$default_name" ]]; then PROFILE="$default_name"; else PROFILE="${profiles[0]}"; fi
+      return
+    fi
+    if [[ "$choice" == "n" || "$choice" == "N" ]]; then
+      wizard_create_profile
+      return
+    fi
+    if [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le "${#profiles[@]}" ]]; then
+      PROFILE="${profiles[$((choice-1))]}"
+      return
+    fi
+    echo "Invalid option, try again." >&2
+    echo ""
+  done
+}
+
+wizard_pick_tailscale() {
+  # Respect an explicit -t/--tailscale.
+  [[ "$TAILSCALE" == true ]] && return 0
+
+  echo ""
+  read -rp "Connect to Tailscale? [y/N]: " ans
+  if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
+    TAILSCALE=true
+    read -rp "Exit node (machine name or IP; empty for none): " node
+    node="$(echo "$node" | tr -d '[:space:]')"
+    [[ -n "$node" ]] && EXIT_NODE="$node"
+  fi
+}
+
+run_wizard() {
+  echo ""
+  echo "claudeinjail wizard"
+  echo "Answer the prompts below. Press Enter to accept the default."
+
+  # Ordered list of wizard steps. Add new questions here.
+  wizard_pick_profile
+  SELECT_IMAGE=true
+  select_image          # reuses the standard image picker
+  SELECT_IMAGE=false
+  wizard_pick_tailscale
+}
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -1004,6 +1120,7 @@ SAFE_MODE=false
 TAILSCALE=false
 EXIT_NODE=""
 VERBOSE=false
+WIZARD=false
 COMMAND=""
 
 # Parse arguments
@@ -1038,6 +1155,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --select-image|-i)
       SELECT_IMAGE=true
+      ;;
+    --wizard|-w)
+      WIZARD=true
       ;;
     --safe)
       SAFE_MODE=true
@@ -1081,6 +1201,11 @@ if [[ "$COMMAND" == "profile" ]]; then
       ;;
   esac
   exit 0
+fi
+
+# Wizard mode: ask everything interactively (profile, image, Tailscale)
+if [[ "$WIZARD" == true ]]; then
+  run_wizard
 fi
 
 # Validate --exit-node requires --tailscale
