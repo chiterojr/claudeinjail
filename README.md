@@ -8,6 +8,7 @@ Run [Claude Code](https://claude.ai) CLI inside a Docker container, isolated fro
 - [Quick start](#quick-start)
 - [Usage](#usage)
   - [Interactive mode](#interactive-mode)
+  - [Context directories](#context-directories)
 - [Profiles](#profiles)
 - [Docker images](#docker-images)
 - [Customizing the image](#customizing-the-image)
@@ -63,7 +64,8 @@ claudeinjail [command] [options]
 
 | Option | Description |
 |---|---|
-| `-w, --wizard` | Interactive mode: ask everything through guided prompts (profile, image, Tailscale) instead of remembering individual flags |
+| `-w, --wizard` | Interactive mode: ask everything through guided prompts (profile, image, context directories, Tailscale) instead of remembering individual flags |
+| `-c, --context <dir>` | Mount a host directory read-only at `/context/<dir-name>`. Repeatable; each must exist and have a unique base name |
 | `-p, --profile <name>` | Use a specific profile |
 | `-i, --select-image` | Prompt to choose an image (4 built-in bases + any ejected custom images) |
 | `-b, --build-only` | Only build the Docker image, don't start a container |
@@ -78,6 +80,7 @@ claudeinjail [command] [options]
 ```bash
 claudeinjail                              # Start with default profile (Alpine)
 claudeinjail -w                           # Interactive wizard (asks everything)
+claudeinjail -c ~/docs -c ../shared-lib   # Mount dirs at /context/docs, /context/shared-lib
 claudeinjail -p work                      # Start with the "work" profile
 claudeinjail -i                           # Choose base image interactively
 claudeinjail -b                           # Build image only
@@ -99,10 +102,28 @@ If you'd rather not remember the individual flags, run `claudeinjail -w` (or
 
 - **Profile** — pick an existing one or create a new profile on the spot.
 - **Image** — choose a base (Alpine, Debian, ±Node) or a custom ejected image.
+- **Context directories** — keep adding host directories to expose (it checks each exists) until you press Enter on an empty line.
 - **Tailscale** — connect to your tailnet and, optionally, pick an exit node.
 
 Any explicit flag you also pass takes precedence over the matching prompt, so
 `claudeinjail -w -p work` skips the profile question and uses `work` directly.
+
+### Context directories
+
+Besides the current directory (mounted read-write at `/workspace`), you can
+expose extra host directories to Claude as read-only references. Each is
+mounted at `/context/<dir-name>`, where `<dir-name>` is the directory's base
+name:
+
+```bash
+claudeinjail -c ~/design-docs -c ../shared-lib
+# /context/design-docs  and  /context/shared-lib  (both read-only)
+```
+
+The directory must already exist, and base names must be unique (two different
+paths both named `docs` would collide at `/context/docs` and are rejected). In
+the wizard, the context step keeps prompting — validating each path — until you
+press Enter on an empty line.
 
 ## Profiles
 

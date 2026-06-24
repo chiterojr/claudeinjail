@@ -305,10 +305,16 @@ COMMANDS
 
 OPTIONS
   -w, --wizard                    Interactive mode. Asks everything through
-                                  guided prompts (profile, image, and
-                                  Tailscale) so you don't have to remember the
-                                  individual flags. Explicit flags still work
-                                  and override what the wizard would ask.
+                                  guided prompts (profile, image, context
+                                  directories, and Tailscale) so you don't have
+                                  to remember the individual flags. Explicit
+                                  flags still work and override what the wizard
+                                  would ask.
+
+  -c, --context <dir>             Mount an extra host directory read-only inside
+                                  the container at /context/<dir-name>. The
+                                  directory must exist. Repeatable to mount
+                                  several; each must have a unique base name.
 
   -p, --profile <name>            Use the specified profile when starting
                                   the container. The profile must already exist.
@@ -365,6 +371,7 @@ ENVIRONMENT VARIABLES
 EXAMPLES
   claudeinjail                              Start with default profile and Alpine
   claudeinjail -w                           Interactive wizard (asks everything)
+  claudeinjail -c ~/docs -c ../shared-lib   Mount dirs at /context/docs, /context/shared-lib
   claudeinjail -p work                      Start with the "work" profile
   claudeinjail -i                           Prompt which image to use
   claudeinjail -b                           Only build the Alpine image
@@ -999,6 +1006,50 @@ validate_profile() {
 }
 
 # ============================================================================
+# Context directories (mounted read-only at /context/<name>)
+# ============================================================================
+#
+# Shared validation used by both the -c/--context flags and the wizard.
+# Resolves the path to an absolute directory, checks it exists, and rejects
+# /context/<name> collisions. On success appends to CONTEXT_PATHS/CONTEXT_NAMES.
+
+add_context_dir() {
+  local input="$1"
+  if [[ -z "$input" ]]; then
+    echo "Error: empty context directory path." >&2
+    return 1
+  fi
+
+  # Expand a leading ~ (the shell already does this for flags, not for reads).
+  input="${input/#\~/$HOME}"
+
+  local abs
+  abs="$(cd "$input" 2>/dev/null && pwd)" || {
+    echo "Error: context directory not found (or not a directory): $input" >&2
+    return 1
+  }
+
+  local name
+  name="$(basename "$abs")"
+  if [[ -z "$name" || "$name" == "/" ]]; then
+    echo "Error: cannot derive a /context name from: $abs" >&2
+    return 1
+  fi
+
+  local existing
+  for existing in "${CONTEXT_NAMES[@]}"; do
+    if [[ "$existing" == "$name" ]]; then
+      echo "Error: '/context/$name' is already mapped — directory names must be unique." >&2
+      return 1
+    fi
+  done
+
+  CONTEXT_PATHS+=("$abs")
+  CONTEXT_NAMES+=("$name")
+  return 0
+}
+
+# ============================================================================
 # Wizard (interactive mode: -w / --wizard)
 # ============================================================================
 #
@@ -1080,6 +1131,20 @@ wizard_pick_profile() {
   done
 }
 
+wizard_pick_context() {
+  echo ""
+  echo "Context directories — mounted read-only at /context/<name>."
+  echo "Expose extra host directories to Claude. Press Enter (empty) to finish."
+  echo ""
+  while true; do
+    read -rp "Context directory (empty to finish): " dir
+    [[ -z "$dir" ]] && break
+    if add_context_dir "$dir"; then
+      echo "  mapped /context/${CONTEXT_NAMES[-1]}  <-  ${CONTEXT_PATHS[-1]}"
+    fi
+  done
+}
+
 wizard_pick_tailscale() {
   # Respect an explicit -t/--tailscale.
   [[ "$TAILSCALE" == true ]] && return 0
@@ -1104,6 +1169,7 @@ run_wizard() {
   SELECT_IMAGE=true
   select_image          # reuses the standard image picker
   SELECT_IMAGE=false
+  wizard_pick_context
   wizard_pick_tailscale
 }
 
@@ -1121,6 +1187,8 @@ TAILSCALE=false
 EXIT_NODE=""
 VERBOSE=false
 WIZARD=false
+CONTEXT_PATHS=()
+CONTEXT_NAMES=()
 COMMAND=""
 
 # Parse arguments
@@ -1158,6 +1226,13 @@ while [[ $# -gt 0 ]]; do
       ;;
     --wizard|-w)
       WIZARD=true
+      ;;
+    --context|-c)
+      add_context_dir "$2" || exit 1
+      shift
+      ;;
+    --context=*)
+      add_context_dir "${1#--context=}" || exit 1
       ;;
     --safe)
       SAFE_MODE=true
@@ -1241,6 +1316,12 @@ mkdir -p "$PROFILE_DIR/.claude"
 echo ""
 echo "Profile:     $PROFILE"
 echo "Configs at:  $PROFILE_DIR"
+if [[ ${#CONTEXT_PATHS[@]} -gt 0 ]]; then
+  echo "Context:"
+  for idx in "${!CONTEXT_PATHS[@]}"; do
+    echo "  /context/${CONTEXT_NAMES[$idx]}  <-  ${CONTEXT_PATHS[$idx]}  (ro)"
+  done
+fi
 echo ""
 
 # Generate temporary gitconfig with resolved values from the current directory
@@ -1273,6 +1354,11 @@ DOCKER_ARGS=(
 # Mount git config (resolved from host) and SSH keys
 [[ -n "$GITCONFIG_TMP" ]] && DOCKER_ARGS+=(-v "$GITCONFIG_TMP":/home/claude/.gitconfig:ro)
 [[ -d "$HOME/.ssh" ]] && DOCKER_ARGS+=(-v "$HOME/.ssh":/home/claude/.ssh:ro)
+
+# Mount extra context directories read-only at /context/<name>
+for idx in "${!CONTEXT_PATHS[@]}"; do
+  DOCKER_ARGS+=(-v "${CONTEXT_PATHS[$idx]}":"/context/${CONTEXT_NAMES[$idx]}":ro)
+done
 
 # Tailscale support
 if [[ "$TAILSCALE" == true ]]; then
