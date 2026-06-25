@@ -64,11 +64,12 @@ claudeinjail [command] [options]
 
 | Option | Description |
 |---|---|
-| `-w, --wizard` | Interactive mode: ask everything through guided prompts (profile, image, context directories, Tailscale) instead of remembering individual flags |
+| `-w, --wizard` | Interactive mode: ask everything through guided prompts (profile, image, context directories, resume, Tailscale) instead of remembering individual flags |
 | `-c, --context <dir>` | Mount a host directory read-only at `/context/<dir-name>`. Repeatable; each must exist and have a unique base name |
 | `-p, --profile <name>` | Use a specific profile |
 | `-i, --select-image` | Prompt to choose an image (4 built-in bases + any ejected custom images) |
 | `-b, --build-only` | Only build the Docker image, don't start a container |
+| `-r, --resume` | Resume a previous Claude session (forwards `--resume`, showing the session picker). No effect with `--shell` |
 | `-s, --shell` | Open a shell in the container instead of launching Claude |
 | `-t, --tailscale` | Connect the container to your Tailscale network |
 | `--exit-node <node>` | Route all container traffic through a Tailscale exit node (requires `--tailscale`) |
@@ -84,6 +85,7 @@ claudeinjail -c ~/docs -c ../shared-lib   # Mount dirs at /context/docs, /contex
 claudeinjail -p work                      # Start with the "work" profile
 claudeinjail -i                           # Choose base image interactively
 claudeinjail -b                           # Build image only
+claudeinjail -r                           # Resume a previous Claude session
 claudeinjail -s                           # Open a shell in the container
 claudeinjail -s -p work                   # Shell with "work" profile
 claudeinjail profile create work          # Create a new profile
@@ -103,6 +105,7 @@ If you'd rather not remember the individual flags, run `claudeinjail -w` (or
 - **Profile** — pick an existing one or create a new profile on the spot.
 - **Image** — choose a base (Alpine, Debian, ±Node) or a custom ejected image.
 - **Context directories** — keep adding host directories to expose (it checks each exists) until you press Enter on an empty line.
+- **Resume** — optionally resume a previous Claude session via the session picker.
 - **Tailscale** — connect to your tailnet and, optionally, pick an exit node.
 
 Any explicit flag you also pass takes precedence over the matching prompt, so

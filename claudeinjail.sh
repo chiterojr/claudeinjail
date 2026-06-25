@@ -306,7 +306,7 @@ COMMANDS
 OPTIONS
   -w, --wizard                    Interactive mode. Asks everything through
                                   guided prompts (profile, image, context
-                                  directories, and Tailscale) so you don't have
+                                  directories, resume, and Tailscale) so you don't have
                                   to remember the individual flags. Explicit
                                   flags still work and override what the wizard
                                   would ask.
@@ -327,6 +327,11 @@ OPTIONS
 
   -b, --build-only                Only build the Docker image without starting
                                   the container. Useful for preparing the image.
+
+  -r, --resume                    Resume a previous Claude session. Forwards
+                                  --resume to Claude, which shows an interactive
+                                  picker of past sessions for the current
+                                  workspace. Has no effect with --shell.
 
   -s, --shell                     Open a shell (/bin/bash) in the container
                                   instead of launching Claude. Useful for
@@ -375,6 +380,7 @@ EXAMPLES
   claudeinjail -p work                      Start with the "work" profile
   claudeinjail -i                           Prompt which image to use
   claudeinjail -b                           Only build the Alpine image
+  claudeinjail -r                           Resume a previous Claude session
   claudeinjail -s                           Open a shell in the container
   claudeinjail -s -p work                   Shell with "work" profile
   claudeinjail -b -i                        Prompt image and build without starting
@@ -1145,6 +1151,15 @@ wizard_pick_context() {
   done
 }
 
+wizard_pick_resume() {
+  # Respect an explicit -r/--resume.
+  [[ "$RESUME" == true ]] && return 0
+
+  echo ""
+  read -rp "Resume a previous Claude session? [y/N]: " ans
+  [[ "$ans" == "y" || "$ans" == "Y" ]] && RESUME=true
+}
+
 wizard_pick_tailscale() {
   # Respect an explicit -t/--tailscale.
   [[ "$TAILSCALE" == true ]] && return 0
@@ -1170,6 +1185,7 @@ run_wizard() {
   select_image          # reuses the standard image picker
   SELECT_IMAGE=false
   wizard_pick_context
+  wizard_pick_resume
   wizard_pick_tailscale
 }
 
@@ -1183,6 +1199,7 @@ PROFILE=""
 SELECT_IMAGE=false
 SHELL_ONLY=false
 SAFE_MODE=false
+RESUME=false
 TAILSCALE=false
 EXIT_NODE=""
 VERBOSE=false
@@ -1236,6 +1253,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --safe)
       SAFE_MODE=true
+      ;;
+    --resume|-r)
+      RESUME=true
       ;;
     --shell|-s)
       SHELL_ONLY=true
@@ -1430,6 +1450,11 @@ else
   DROP_PRIVS="gosu"
 fi
 
+# Flags forwarded to the Claude CLI inside the container
+CLAUDE_FLAGS=()
+[[ "$SAFE_MODE" != true ]] && CLAUDE_FLAGS+=("--dangerously-skip-permissions")
+[[ "$RESUME" == true ]] && CLAUDE_FLAGS+=("--resume")
+
 # Determine command
 CONTAINER_CMD=()
 if [[ "$SHELL_ONLY" == true ]]; then
@@ -1438,17 +1463,9 @@ if [[ "$SHELL_ONLY" == true ]]; then
   echo ""
 elif [[ "$TAILSCALE" == true ]]; then
   # Tailscale entrypoint handles drop_privs; pass the full target command.
-  if [[ "$SAFE_MODE" == true ]]; then
-    CONTAINER_CMD=("claude")
-  else
-    CONTAINER_CMD=("claude" "--dangerously-skip-permissions")
-  fi
+  CONTAINER_CMD=("claude" "${CLAUDE_FLAGS[@]}")
 else
-  if [[ "$SAFE_MODE" == true ]]; then
-    CONTAINER_CMD=("$DROP_PRIVS" "claude" "claude")
-  else
-    CONTAINER_CMD=("$DROP_PRIVS" "claude" "claude" "--dangerously-skip-permissions")
-  fi
+  CONTAINER_CMD=("$DROP_PRIVS" "claude" "claude" "${CLAUDE_FLAGS[@]}")
 fi
 
 exec docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME" "${CONTAINER_CMD[@]}"
