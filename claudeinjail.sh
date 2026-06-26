@@ -1157,7 +1157,9 @@ wizard_pick_resume() {
 
   echo ""
   read -rp "Resume a previous Claude session? [y/N]: " ans
-  [[ "$ans" == "y" || "$ans" == "Y" ]] && RESUME=true
+  if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
+    RESUME=true
+  fi
 }
 
 wizard_pick_tailscale() {
