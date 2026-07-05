@@ -1346,21 +1346,38 @@ if [[ ${#CONTEXT_PATHS[@]} -gt 0 ]]; then
 fi
 echo ""
 
-# Generate temporary gitconfig with resolved values from the current directory
-GITCONFIG_TMP=""
-if command -v git >/dev/null 2>&1; then
-  git_name="$(git config user.name 2>/dev/null || true)"
-  git_email="$(git config user.email 2>/dev/null || true)"
+# Generate temporary gitconfig with resolved values from the current directory.
+# Abort if it cannot be produced — the container must always carry a git identity.
+if ! command -v git >/dev/null 2>&1; then
+  echo "Error: git is not installed on the host; cannot generate a .gitconfig for the container." >&2
+  exit 1
+fi
 
-  if [[ -n "$git_name" || -n "$git_email" ]]; then
-    GITCONFIG_TMP="/tmp/$(generate_instance_name)-gitconfig"
-    trap 'rm -f "$GITCONFIG_TMP"' EXIT
-    {
-      echo "[user]"
-      [[ -n "$git_name" ]]  && echo "    name = $git_name"
-      [[ -n "$git_email" ]] && echo "    email = $git_email"
-    } > "$GITCONFIG_TMP"
-  fi
+git_name="$(git config user.name 2>/dev/null || true)"
+git_email="$(git config user.email 2>/dev/null || true)"
+
+if [[ -z "$git_name" && -z "$git_email" ]]; then
+  echo "Error: no git user.name or user.email configured; cannot generate a .gitconfig for the container." >&2
+  echo "Configure one first, e.g.:" >&2
+  echo "  git config --global user.name \"Your Name\"" >&2
+  echo "  git config --global user.email you@example.com" >&2
+  exit 1
+fi
+
+GITCONFIG_TMP="/tmp/$(generate_instance_name)-gitconfig"
+trap 'rm -f "$GITCONFIG_TMP"' EXIT
+{
+  echo "[user]"
+  [[ -n "$git_name" ]]  && echo "    name = $git_name"
+  [[ -n "$git_email" ]] && echo "    email = $git_email"
+} > "$GITCONFIG_TMP" || {
+  echo "Error: failed to write temporary gitconfig at $GITCONFIG_TMP." >&2
+  exit 1
+}
+
+if [[ ! -f "$GITCONFIG_TMP" ]]; then
+  echo "Error: temporary gitconfig was not created at $GITCONFIG_TMP." >&2
+  exit 1
 fi
 
 # Build docker run arguments
@@ -1373,8 +1390,9 @@ DOCKER_ARGS=(
   -v "$PROFILE_DIR/.claude.json":/home/claude/.claude.json
 )
 
-# Mount git config (resolved from host) and SSH keys
-[[ -n "$GITCONFIG_TMP" ]] && DOCKER_ARGS+=(-v "$GITCONFIG_TMP":/home/claude/.gitconfig:ro)
+# Mount git config (resolved from host) and SSH keys.
+# Require a regular file so Docker never auto-creates a directory at the target.
+[[ -f "$GITCONFIG_TMP" ]] && DOCKER_ARGS+=(-v "$GITCONFIG_TMP":/home/claude/.gitconfig:ro)
 [[ -d "$HOME/.ssh" ]] && DOCKER_ARGS+=(-v "$HOME/.ssh":/home/claude/.ssh:ro)
 
 # Mount extra context directories read-only at /context/<name>

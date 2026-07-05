@@ -269,6 +269,13 @@ The container automatically picks up your git identity and SSH keys from the hos
 
 - **Git config** — Before starting the container, `claudeinjail` resolves `user.name` and `user.email` from the current directory (respecting your `includeIf` rules, nested `.gitconfig` files, etc.) and generates a temporary `.gitconfig` mounted read-only into the container. This means the correct identity is used regardless of how complex your host git configuration is.
 
+  A git identity is **required**: if `git` is not installed, or neither `user.name` nor `user.email` can be resolved, `claudeinjail` aborts before starting the container rather than launching one without a usable git identity. Configure one with, e.g.:
+
+  ```sh
+  git config --global user.name "Your Name"
+  git config --global user.email you@example.com
+  ```
+
 - **SSH keys** — If `~/.ssh` exists on the host, it is mounted read-only at `/home/claude/.ssh`. This allows git operations over SSH (clone, push, pull) to work inside the container without any extra setup.
 
 ## Environment variables
