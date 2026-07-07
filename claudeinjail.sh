@@ -59,11 +59,9 @@ ENV USE_BUILTIN_RIPGREP=0
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Workspace
+# Run as root so su-exec can drop privileges to the claude user.
+# The working directory is set at runtime (docker run -w) from the host path.
 USER root
-RUN mkdir -p /workspace && chown ${USERNAME}:${USERNAME} /workspace
-
-WORKDIR /workspace
 
 CMD ["su-exec", "claude", "claude"]
 DOCKERFILE
@@ -120,11 +118,9 @@ ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Workspace
+# Run as root so gosu can drop privileges to the claude user.
+# The working directory is set at runtime (docker run -w) from the host path.
 USER root
-RUN mkdir -p /workspace && chown ${USERNAME}:${USERNAME} /workspace
-
-WORKDIR /workspace
 
 CMD ["gosu", "claude", "claude"]
 DOCKERFILE
@@ -177,11 +173,9 @@ ENV USE_BUILTIN_RIPGREP=0
 RUN curl -fsSL https://bun.sh/install | bash
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Workspace
+# Run as root so su-exec can drop privileges to the claude user.
+# The working directory is set at runtime (docker run -w) from the host path.
 USER root
-RUN mkdir -p /workspace && chown ${USERNAME}:${USERNAME} /workspace
-
-WORKDIR /workspace
 
 CMD ["su-exec", "claude", "claude"]
 DOCKERFILE
@@ -241,11 +235,9 @@ ENV PATH="/home/${USERNAME}/.local/bin:/home/${USERNAME}/.bun/bin:${PATH}"
 RUN curl -fsSL https://bun.sh/install | bash
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Workspace
+# Run as root so gosu can drop privileges to the claude user.
+# The working directory is set at runtime (docker run -w) from the host path.
 USER root
-RUN mkdir -p /workspace && chown ${USERNAME}:${USERNAME} /workspace
-
-WORKDIR /workspace
 
 CMD ["gosu", "claude", "claude"]
 DOCKERFILE
@@ -1380,12 +1372,18 @@ if [[ ! -f "$GITCONFIG_TMP" ]]; then
   exit 1
 fi
 
+# Mount the current directory under the claude user's home, preserving its name,
+# and make it the working directory the container starts in.
+WORKDIR_NAME="$(basename "$(pwd)")"
+CONTAINER_WORKDIR="/home/claude/${WORKDIR_NAME}"
+
 # Build docker run arguments
 DOCKER_ARGS=(
   --rm -it
   --name "$(generate_instance_name)"
   -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
-  -v "$(pwd)":/workspace
+  -v "$(pwd)":"$CONTAINER_WORKDIR"
+  -w "$CONTAINER_WORKDIR"
   -v "$PROFILE_DIR/.claude":/home/claude/.claude
   -v "$PROFILE_DIR/.claude.json":/home/claude/.claude.json
 )

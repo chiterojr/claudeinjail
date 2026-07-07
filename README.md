@@ -113,7 +113,8 @@ Any explicit flag you also pass takes precedence over the matching prompt, so
 
 ### Context directories
 
-Besides the current directory (mounted read-write at `/workspace`), you can
+Besides the current directory (mounted read-write at `/home/claude/<dir-name>`,
+where `<dir-name>` is the current directory's base name), you can
 expose extra host directories to Claude as read-only references. Each is
 mounted at `/context/<dir-name>`, where `<dir-name>` is the directory's base
 name:
@@ -284,7 +285,7 @@ The container automatically picks up your git identity and SSH keys from the hos
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API key (optional, depends on auth method) |
 
-The current directory (`pwd`) is mounted as `/workspace` inside the container. Just `cd` into your project and run `claudeinjail`.
+The current directory (`pwd`) is mounted at `/home/claude/<dir-name>` inside the container (where `<dir-name>` is its base name), and the container starts in that directory. Just `cd` into your project and run `claudeinjail`.
 
 ## Uninstall
 
