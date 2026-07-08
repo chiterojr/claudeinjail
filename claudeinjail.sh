@@ -295,21 +295,11 @@ COMMANDS
 
   help                            Show this message.
 
-OPTIONS
-  -w, --wizard                    Interactive mode. Asks everything through
-                                  guided prompts (profile, image, context
-                                  directories, resume, and Tailscale) so you don't have
-                                  to remember the individual flags. Explicit
-                                  flags still work and override what the wizard
-                                  would ask.
-
+CONTAINER OPTIONS
   -c, --context <dir>             Mount an extra host directory read-only inside
                                   the container at /context/<dir-name>. The
                                   directory must exist. Repeatable to mount
                                   several; each must have a unique base name.
-
-  -p, --profile <name>            Use the specified profile when starting
-                                  the container. The profile must already exist.
 
   -i, --select-image              Prompt which image to use. Lists the four
                                   built-in bases (Alpine, Debian, Alpine+Node,
@@ -320,15 +310,43 @@ OPTIONS
   -b, --build-only                Only build the Docker image without starting
                                   the container. Useful for preparing the image.
 
+  -s, --shell                     Open a shell (/bin/bash) in the container
+                                  instead of launching Claude. Useful for
+                                  inspecting the container, installing tools,
+                                  or debugging.
+
+CLAUDE OPTIONS
+  -p, --profile <name>            Use the specified profile when starting
+                                  the container. The profile must already exist.
+
   -r, --resume                    Resume a previous Claude session. Forwards
                                   --resume to Claude, which shows an interactive
                                   picker of past sessions for the current
                                   workspace. Has no effect with --shell.
 
-  -s, --shell                     Open a shell (/bin/bash) in the container
-                                  instead of launching Claude. Useful for
-                                  inspecting the container, installing tools,
-                                  or debugging.
+  --safe                          Run Claude Code with standard permission
+                                  prompts. By default, claudeinjail launches
+                                  with --dangerously-skip-permissions since
+                                  the container provides isolation. Use --safe
+                                  to restore normal permission checks.
+
+ADDITIONAL TOOLING
+  -w, --wizard                    Interactive mode. Asks everything through
+                                  guided prompts (profile, image, context
+                                  directories, resume, and Tailscale) so you don't have
+                                  to remember the individual flags. Explicit
+                                  flags still work and override what the wizard
+                                  would ask.
+
+  -ww, --wizard-batch             Batch wizard. Shows every wizard step at once
+                                  and reads all answers from a single line,
+                                  positional and separated by ';'. Omitted
+                                  fields (empty, or dropped from the tail) fall
+                                  back to their default; only the profile is
+                                  required. Order:
+                                    profile;image;contexts;resume;tailscale;exit-node
+                                  Contexts are comma-separated. Example:
+                                    1;3;~/dev/a,~/dev/b;n;y
 
   -t, --tailscale                 Connect the container to your Tailscale
                                   network (tailnet). Authentication is done
@@ -340,12 +358,6 @@ OPTIONS
                                   Tailscale exit node. Requires --tailscale.
                                   Accepts a Tailscale IP or machine name.
                                   LAN access is allowed automatically.
-
-  --safe                          Run Claude Code with standard permission
-                                  prompts. By default, claudeinjail launches
-                                  with --dangerously-skip-permissions since
-                                  the container provides isolation. Use --safe
-                                  to restore normal permission checks.
 
   -v, --verbose                   Show Tailscale daemon logs in the terminal.
                                   Useful for debugging connection issues.
@@ -368,6 +380,7 @@ ENVIRONMENT VARIABLES
 EXAMPLES
   claudeinjail                              Start with default profile and Alpine
   claudeinjail -w                           Interactive wizard (asks everything)
+  claudeinjail -ww                          Batch wizard (all answers in one line)
   claudeinjail -c ~/docs -c ../shared-lib   Mount dirs at /context/docs, /context/shared-lib
   claudeinjail -p work                      Start with the "work" profile
   claudeinjail -i                           Prompt which image to use
@@ -808,6 +821,32 @@ cmd_eject() {
 # Image selection (optional, Alpine is the default)
 # ============================================================================
 
+# Maps a numeric image choice (1-4 built-ins, 5+ customs) to IMAGE_NAME /
+# IMAGE_VARIANT. Empty or "1" selects Alpine. Returns non-zero on an invalid
+# choice without touching the globals, so callers apply their own fallback.
+apply_image_choice() {
+  local choice="$1"
+  local -a customs=()
+  mapfile -t customs < <(list_custom_images)
+  local last=$((4 + ${#customs[@]}))
+
+  if [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 5 && "$choice" -le "$last" ]]; then
+    local picked="${customs[$((choice-5))]}"
+    IMAGE_NAME="claudeinjail-custom-$picked"
+    IMAGE_VARIANT="custom:$picked"
+    return 0
+  fi
+
+  case "$choice" in
+    ""|1) IMAGE_NAME="claudeinjail-alpine";      IMAGE_VARIANT="alpine" ;;
+    2)    IMAGE_NAME="claudeinjail-debian";      IMAGE_VARIANT="debian" ;;
+    3)    IMAGE_NAME="claudeinjail-alpine-node"; IMAGE_VARIANT="alpine-node" ;;
+    4)    IMAGE_NAME="claudeinjail-debian-node"; IMAGE_VARIANT="debian-node" ;;
+    *)    return 1 ;;
+  esac
+  return 0
+}
+
 select_image() {
   [[ "$SELECT_IMAGE" == true ]] || return 0
 
@@ -824,7 +863,6 @@ select_image() {
   echo "  4) Debian + Node.js + Bun (node:lts-slim)"
 
   local i=5
-  local -a idx_to_name=()
   for name in "${customs[@]}"; do
     local desc
     desc="$(read_image_description "$IMAGES_DIR/$name/Dockerfile")"
@@ -833,38 +871,17 @@ select_image() {
     else
       echo "  $i) custom: $name"
     fi
-    idx_to_name+=("$name")
     i=$((i+1))
   done
 
   local last=$((i-1))
   read -rp "Choose [1-$last]: " choice
 
-  if [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 5 && "$choice" -le "$last" ]]; then
-    local picked="${idx_to_name[$((choice-5))]}"
-    IMAGE_NAME="claudeinjail-custom-$picked"
-    IMAGE_VARIANT="custom:$picked"
-    return
-  fi
-
-  case "$choice" in
-    2)
-      IMAGE_NAME="claudeinjail-debian"
-      IMAGE_VARIANT="debian"
-      ;;
-    3)
-      IMAGE_NAME="claudeinjail-alpine-node"
-      IMAGE_VARIANT="alpine-node"
-      ;;
-    4)
-      IMAGE_NAME="claudeinjail-debian-node"
-      IMAGE_VARIANT="debian-node"
-      ;;
-    *)
-      IMAGE_NAME="claudeinjail-alpine"
-      IMAGE_VARIANT="alpine"
-      ;;
-  esac
+  # Invalid or out-of-range input falls back to the Alpine default.
+  apply_image_choice "$choice" || {
+    IMAGE_NAME="claudeinjail-alpine"
+    IMAGE_VARIANT="alpine"
+  }
 }
 
 # ============================================================================
@@ -1184,6 +1201,167 @@ run_wizard() {
 }
 
 # ============================================================================
+# Batch wizard (interactive mode: -ww / --wizard-batch)
+# ============================================================================
+#
+# Shows every wizard step at once, then reads all answers from a single line.
+# Answers are positional and separated by ';'. Omitted fields (empty or dropped
+# from the tail) fall back to their default; only the profile is required.
+#
+#   Order:   profile ; image ; contexts ; resume ; tailscale ; exit-node
+#   Example: 1;3;~/dev/a,~/dev/b;n;y;my-server
+#
+# The step order mirrors run_wizard(). When adding a wizard step, update both.
+
+run_wizard_batch() {
+  mkdir -p "$CONFIG_DIR"
+  local default_name
+  default_name="$(get_default_profile)"
+  local -a profiles=()
+  mapfile -t profiles < <(list_profiles)
+  local -a customs=()
+  mapfile -t customs < <(list_custom_images)
+
+  if [[ ${#profiles[@]} -eq 0 ]]; then
+    echo "Error: no profiles found in $CONFIG_DIR" >&2
+    echo "Create one first: claudeinjail profile create <name>" >&2
+    exit 1
+  fi
+
+  # Number of the default profile, used in the example line.
+  local default_num=1 i
+  for i in "${!profiles[@]}"; do
+    [[ "${profiles[$i]}" == "$default_name" ]] && default_num=$((i+1))
+  done
+
+  echo ""
+  echo "claudeinjail — batch wizard (-ww)"
+  echo "================================="
+  echo ""
+  echo "Answer every step in a single line, fields separated by ';' (positional)."
+  echo "Leave a field empty (or drop trailing fields) to accept its default."
+  echo "Only the profile is required."
+  echo ""
+  echo "  Order:   profile ; image ; contexts ; resume ; tailscale ; exit-node"
+  echo "  Example: ${default_num};1;~/dev/a,~/dev/b;n;y;my-server"
+  echo ""
+
+  echo "[1] PROFILE  (required)"
+  for i in "${!profiles[@]}"; do
+    if [[ "${profiles[$i]}" == "$default_name" ]]; then
+      echo "    $((i+1))) ${profiles[$i]}  (default)"
+    else
+      echo "    $((i+1))) ${profiles[$i]}"
+    fi
+  done
+  echo "    -> a number from the list"
+  echo ""
+
+  echo "[2] IMAGE  (default: 1 — Alpine)"
+  echo "    1) Alpine (alpine:3)"
+  echo "    2) Debian (debian:12-slim)"
+  echo "    3) Alpine + Node.js + Bun (node:lts-alpine)"
+  echo "    4) Debian + Node.js + Bun (node:lts-slim)"
+  local n=5 name desc
+  for name in "${customs[@]}"; do
+    desc="$(read_image_description "$IMAGES_DIR/$name/Dockerfile")"
+    if [[ -n "$desc" ]]; then
+      echo "    $n) custom: $name — $desc"
+    else
+      echo "    $n) custom: $name"
+    fi
+    n=$((n+1))
+  done
+  echo "    -> a number from the list"
+  echo ""
+
+  echo "[3] CONTEXT DIRECTORIES  (default: none)"
+  echo "    Host dirs mounted read-only at /context/<name>, comma-separated."
+  echo "    -> e.g. ~/dev/a,~/dev/b"
+  echo ""
+
+  echo "[4] RESUME  (default: n)"
+  echo "    Resume a previous Claude session."
+  echo "    -> y / n"
+  echo ""
+
+  echo "[5] TAILSCALE  (default: n)"
+  echo "    Connect the container to your tailnet."
+  echo "    -> y / n"
+  echo ""
+
+  echo "[6] EXIT NODE  (default: none — requires tailscale = y)"
+  echo "    Route all container traffic through a Tailscale exit node."
+  echo "    -> machine name or IP"
+  echo ""
+
+  local line
+  read -rp "Your answer: " line
+
+  # Split the line into positional fields on ';'.
+  local -a fields=()
+  IFS=';' read -ra fields <<< "$line"
+
+  local f_profile f_image f_context f_resume f_tailscale f_exitnode
+  f_profile="$(echo "${fields[0]:-}"  | tr -d '[:space:]')"
+  f_image="$(echo "${fields[1]:-}"    | tr -d '[:space:]')"
+  f_context="${fields[2]:-}"
+  f_resume="$(echo "${fields[3]:-}"   | tr -d '[:space:]')"
+  f_tailscale="$(echo "${fields[4]:-}" | tr -d '[:space:]')"
+  f_exitnode="$(echo "${fields[5]:-}" | tr -d '[:space:]')"
+
+  # [1] Profile — required.
+  if [[ -z "$f_profile" ]]; then
+    echo "Error: profile (field 1) is required." >&2
+    exit 1
+  fi
+  if [[ ! "$f_profile" =~ ^[0-9]+$ ]] || (( f_profile < 1 || f_profile > ${#profiles[@]} )); then
+    echo "Error: invalid profile selection '$f_profile'. Choose 1-${#profiles[@]}." >&2
+    exit 1
+  fi
+  PROFILE="${profiles[$((f_profile-1))]}"
+
+  # [2] Image — default Alpine when omitted.
+  if [[ -n "$f_image" ]]; then
+    if ! apply_image_choice "$f_image"; then
+      echo "Warning: invalid image selection '$f_image'; using default (Alpine)." >&2
+      IMAGE_NAME="claudeinjail-alpine"
+      IMAGE_VARIANT="alpine"
+    fi
+  fi
+
+  # [3] Context — comma-separated list of host directories.
+  if [[ -n "$f_context" ]]; then
+    local -a dirs=() d
+    IFS=',' read -ra dirs <<< "$f_context"
+    for d in "${dirs[@]}"; do
+      d="$(echo "$d" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      [[ -z "$d" ]] && continue
+      add_context_dir "$d" || exit 1
+    done
+  fi
+
+  # [4] Resume.
+  case "$f_resume" in
+    y|Y|yes) RESUME=true ;;
+  esac
+
+  # [5] Tailscale.
+  case "$f_tailscale" in
+    y|Y|yes) TAILSCALE=true ;;
+  esac
+
+  # [6] Exit node — only meaningful with Tailscale enabled.
+  if [[ -n "$f_exitnode" ]]; then
+    if [[ "$TAILSCALE" == true ]]; then
+      EXIT_NODE="$f_exitnode"
+    else
+      echo "Warning: exit node ignored — it requires tailscale = y (field 5)." >&2
+    fi
+  fi
+}
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -1198,6 +1376,7 @@ TAILSCALE=false
 EXIT_NODE=""
 VERBOSE=false
 WIZARD=false
+WIZARD_BATCH=false
 CONTEXT_PATHS=()
 CONTEXT_NAMES=()
 COMMAND=""
@@ -1237,6 +1416,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --wizard|-w)
       WIZARD=true
+      ;;
+    --wizard-batch|-ww)
+      WIZARD_BATCH=true
       ;;
     --context|-c)
       add_context_dir "$2" || exit 1
@@ -1293,7 +1475,9 @@ if [[ "$COMMAND" == "profile" ]]; then
 fi
 
 # Wizard mode: ask everything interactively (profile, image, Tailscale)
-if [[ "$WIZARD" == true ]]; then
+if [[ "$WIZARD_BATCH" == true ]]; then
+  run_wizard_batch
+elif [[ "$WIZARD" == true ]]; then
   run_wizard
 fi
 

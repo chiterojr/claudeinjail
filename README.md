@@ -65,6 +65,7 @@ claudeinjail [command] [options]
 | Option | Description |
 |---|---|
 | `-w, --wizard` | Interactive mode: ask everything through guided prompts (profile, image, context directories, resume, Tailscale) instead of remembering individual flags |
+| `-ww, --wizard-batch` | Batch wizard: show every wizard step at once and read all answers from a single line, positional and `;`-separated. Omitted fields fall back to their default; only the profile is required. Order: `profile;image;contexts;resume;tailscale;exit-node` (contexts comma-separated) |
 | `-c, --context <dir>` | Mount a host directory read-only at `/context/<dir-name>`. Repeatable; each must exist and have a unique base name |
 | `-p, --profile <name>` | Use a specific profile |
 | `-i, --select-image` | Prompt to choose an image (4 built-in bases + any ejected custom images) |
@@ -81,6 +82,7 @@ claudeinjail [command] [options]
 ```bash
 claudeinjail                              # Start with default profile (Alpine)
 claudeinjail -w                           # Interactive wizard (asks everything)
+claudeinjail -ww                          # Batch wizard (all answers in one line)
 claudeinjail -c ~/docs -c ../shared-lib   # Mount dirs at /context/docs, /context/shared-lib
 claudeinjail -p work                      # Start with the "work" profile
 claudeinjail -i                           # Choose base image interactively
@@ -110,6 +112,34 @@ If you'd rather not remember the individual flags, run `claudeinjail -w` (or
 
 Any explicit flag you also pass takes precedence over the matching prompt, so
 `claudeinjail -w -p work` skips the profile question and uses `work` directly.
+
+#### Batch wizard
+
+If you already know what you want, `claudeinjail -ww` (or `--wizard-batch`)
+shows every step at once and takes all answers on a **single line**. Answers are
+**positional** and separated by `;`, in this order:
+
+```
+profile ; image ; contexts ; resume ; tailscale ; exit-node
+```
+
+- **profile** (required) — the number of a profile from the list.
+- **image** — the number of an image (default: `1`, Alpine).
+- **contexts** — comma-separated host directories (default: none).
+- **resume** — `y` / `n` (default: `n`).
+- **tailscale** — `y` / `n` (default: `n`).
+- **exit-node** — machine name or IP (default: none; requires `tailscale = y`).
+
+Leave a field empty (or drop trailing fields) to accept its default. Only the
+profile is required. For example, with two profiles listed:
+
+```
+2;3;~/dev/apolus.ai/services,~/dev/chiterojr/handbook;n;y
+```
+
+selects profile 2, the Alpine+Node image, mounts the two context directories,
+skips resume, and connects to Tailscale. `2` on its own is enough — everything
+else falls back to its default.
 
 ### Context directories
 
