@@ -1,0 +1,9 @@
+{
+  "rules": {
+    "suppressed-errors": "error",
+    "no-print": "error",
+    "unused-decls": "error",
+    "unsafe-undefined": "error",
+    "homeless-try": "error"
+  }
+}

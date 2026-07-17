@@ -1,0 +1,12 @@
+.{
+    .name = .claudeinjail,
+    .version = "0.1.0",
+    .fingerprint = 0x93a584ec1c55d816,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

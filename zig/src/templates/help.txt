@@ -1,0 +1,149 @@
+claudeinjail — Claude Code Docker Runner
+=========================================
+
+Runs Claude Code inside a Docker container with support for multiple profiles.
+Each profile maintains isolated credentials and settings, allowing you to use
+different accounts (e.g., personal, work) without conflicts.
+
+USAGE
+  claudeinjail [command] [options]
+
+COMMANDS
+  (no command)                    Build the image and start the container.
+                                  If no profile is specified, the script tries
+                                  to load the default profile. If none is set,
+                                  it lists available profiles or guides the
+                                  creation of the first one.
+
+  profile create <name>           Create a new profile with the given name.
+                                  Valid names: letters, numbers, hyphens, and
+                                  underscores.
+
+  profile list                    List all existing profiles and indicate
+                                  which one is the default (if any).
+
+  profile delete <name>           Delete a profile. The script asks for
+                                  confirmation before removing. Also accepts
+                                  the --confirm flag to skip the interactive
+                                  prompt (still required explicitly as an
+                                  extra safety layer).
+
+  profile set-default <name>      Set an existing profile as the default.
+                                  The default profile is loaded automatically
+                                  when no --profile is specified.
+
+  eject [name]                    Export a Dockerfile based on one of the
+                                  built-in bases (Alpine, Debian, Alpine+Node,
+                                  Debian+Node) so you can customize it. Each
+                                  custom image is stored under:
+                                    ~/.config/claudeinjail/images/<name>/Dockerfile
+                                  Prompts for name (if omitted), short
+                                  description (max 60 chars), and base image.
+                                  Custom images appear in the 'claudeinjail -i'
+                                  picker alongside the built-in bases.
+
+  help                            Show this message.
+
+CONTAINER OPTIONS
+  -c, --context <dir>             Mount an extra host directory read-only inside
+                                  the container at /context/<dir-name>. The
+                                  directory must exist. Repeatable to mount
+                                  several; each must have a unique base name.
+
+  -i, --select-image              Prompt which image to use. Lists the four
+                                  built-in bases (Alpine, Debian, Alpine+Node,
+                                  Debian+Node) plus any custom images ejected
+                                  via 'claudeinjail eject'. Without this flag,
+                                  Alpine is the default.
+
+  -b, --build-only                Only build the Docker image without starting
+                                  the container. Useful for preparing the image.
+
+  -s, --shell                     Open a shell (/bin/bash) in the container
+                                  instead of launching Claude. Useful for
+                                  inspecting the container, installing tools,
+                                  or debugging.
+
+CLAUDE OPTIONS
+  -p, --profile <name>            Use the specified profile when starting
+                                  the container. The profile must already exist.
+
+  -r, --resume                    Resume a previous Claude session. Forwards
+                                  --resume to Claude, which shows an interactive
+                                  picker of past sessions for the current
+                                  workspace. Has no effect with --shell.
+
+  --safe                          Run Claude Code with standard permission
+                                  prompts. By default, claudeinjail launches
+                                  with --dangerously-skip-permissions since
+                                  the container provides isolation. Use --safe
+                                  to restore normal permission checks.
+
+ADDITIONAL TOOLING
+  -w, --wizard                    Interactive mode. Asks everything through
+                                  guided prompts (profile, image, context
+                                  directories, resume, and Tailscale) so you don't have
+                                  to remember the individual flags. Explicit
+                                  flags still work and override what the wizard
+                                  would ask.
+
+  -ww, --wizard-batch             Batch wizard. Shows every wizard step at once
+                                  and reads all answers from a single line,
+                                  positional and separated by ';'. Omitted
+                                  fields (empty, or dropped from the tail) fall
+                                  back to their default; only the profile is
+                                  required. Order:
+                                    profile;image;contexts;resume;tailscale;exit-node
+                                  Contexts are comma-separated. Example:
+                                    1;3;~/dev/a,~/dev/b;n;y
+
+  -t, --tailscale                 Connect the container to your Tailscale
+                                  network (tailnet). Authentication is done
+                                  via browser on the first run; subsequent
+                                  runs reconnect automatically. State is
+                                  persisted per profile.
+
+  --exit-node <node>              Route all container traffic through a
+                                  Tailscale exit node. Requires --tailscale.
+                                  Accepts a Tailscale IP or machine name.
+                                  LAN access is allowed automatically.
+
+  -v, --verbose                   Show Tailscale daemon logs in the terminal.
+                                  Useful for debugging connection issues.
+
+PROFILES
+  Profiles are stored in:
+    ~/.config/claudeinjail/<name>/
+
+  Each profile contains:
+    .claude/          Settings, OAuth sessions, and agents directory
+    .claude.json      State, MCP servers, and tool permissions
+
+  The default profile is saved in:
+    ~/.config/claudeinjail/default
+
+ENVIRONMENT VARIABLES
+  ANTHROPIC_API_KEY               Anthropic API key (optional, depends on the
+                                  authentication method used).
+
+EXAMPLES
+  claudeinjail                              Start with default profile and Alpine
+  claudeinjail -w                           Interactive wizard (asks everything)
+  claudeinjail -ww                          Batch wizard (all answers in one line)
+  claudeinjail -c ~/docs -c ../shared-lib   Mount dirs at /context/docs, /context/shared-lib
+  claudeinjail -p work                      Start with the "work" profile
+  claudeinjail -i                           Prompt which image to use
+  claudeinjail -b                           Only build the Alpine image
+  claudeinjail -r                           Resume a previous Claude session
+  claudeinjail -s                           Open a shell in the container
+  claudeinjail -s -p work                   Shell with "work" profile
+  claudeinjail -b -i                        Prompt image and build without starting
+  claudeinjail profile create personal      Create the "personal" profile
+  claudeinjail profile list                 List existing profiles
+  claudeinjail profile delete personal      Delete the "personal" profile
+  claudeinjail profile set-default work     Set "work" as default
+  claudeinjail eject                        Eject a Dockerfile (prompts name)
+  claudeinjail eject my-python              Eject directly with the given name
+  claudeinjail --safe                        Start with permission prompts enabled
+  claudeinjail --tailscale                  Start with Tailscale connected
+  claudeinjail -t --exit-node my-server     Tailscale with exit node
