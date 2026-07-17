@@ -338,7 +338,7 @@ ADDITIONAL TOOLING
                                   flags still work and override what the wizard
                                   would ask.
 
-  -ww, --wizard-batch             Batch wizard. Shows every wizard step at once
+  -ww, --wizard-batch [answer]    Batch wizard. Shows every wizard step at once
                                   and reads all answers from a single line,
                                   positional and separated by ';'. Omitted
                                   fields (empty, or dropped from the tail) fall
@@ -347,6 +347,11 @@ ADDITIONAL TOOLING
                                     profile;image;contexts;resume;tailscale;exit-node
                                   Contexts are comma-separated. Example:
                                     1;3;~/dev/a,~/dev/b;n;y
+                                  Pass the answer inline to skip the prompt
+                                  (quote it — ';' is a shell separator):
+                                    claudeinjail -ww "2;4"   (profile 2, image 4)
+                                  Or with the long form:
+                                    claudeinjail --wizard-batch="2;4"
 
   -t, --tailscale                 Connect the container to your Tailscale
                                   network (tailnet). Authentication is done
@@ -381,6 +386,7 @@ EXAMPLES
   claudeinjail                              Start with default profile and Alpine
   claudeinjail -w                           Interactive wizard (asks everything)
   claudeinjail -ww                          Batch wizard (all answers in one line)
+  claudeinjail -ww "2;4"                     Batch wizard inline (profile 2, image 4)
   claudeinjail -c ~/docs -c ../shared-lib   Mount dirs at /context/docs, /context/shared-lib
   claudeinjail -p work                      Start with the "work" profile
   claudeinjail -i                           Prompt which image to use
@@ -1214,6 +1220,8 @@ run_wizard() {
 # The step order mirrors run_wizard(). When adding a wizard step, update both.
 
 run_wizard_batch() {
+  # An inline answer (e.g. -ww "2;4") skips the interactive prompt entirely.
+  local inline_answer="${1:-}"
   mkdir -p "$CONFIG_DIR"
   local default_name
   default_name="$(get_default_profile)"
@@ -1234,6 +1242,11 @@ run_wizard_batch() {
     [[ "${profiles[$i]}" == "$default_name" ]] && default_num=$((i+1))
   done
 
+  local line
+  if [[ -n "$inline_answer" ]]; then
+    # Non-interactive: the answer came straight from the command line.
+    line="$inline_answer"
+  else
   echo ""
   echo "claudeinjail — batch wizard (-ww)"
   echo "================================="
@@ -1295,8 +1308,8 @@ run_wizard_batch() {
   echo "    -> machine name or IP"
   echo ""
 
-  local line
   read -rp "Your answer: " line
+  fi
 
   # Split the line into positional fields on ';'.
   local -a fields=()
@@ -1377,6 +1390,7 @@ EXIT_NODE=""
 VERBOSE=false
 WIZARD=false
 WIZARD_BATCH=false
+WIZARD_BATCH_ANSWER=""
 CONTEXT_PATHS=()
 CONTEXT_NAMES=()
 COMMAND=""
@@ -1419,6 +1433,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --wizard-batch|-ww)
       WIZARD_BATCH=true
+      # Optional inline answer: -ww "2;4" runs the batch wizard without
+      # prompting. The next argument is consumed only when it is not another
+      # flag (the first field is always a profile number, so it never starts
+      # with '-'). Quote it in the shell because ';' is a command separator.
+      if [[ -n "${2:-}" && "$2" != -* ]]; then
+        WIZARD_BATCH_ANSWER="$2"
+        shift
+      fi
+      ;;
+    --wizard-batch=*)
+      WIZARD_BATCH=true
+      WIZARD_BATCH_ANSWER="${1#--wizard-batch=}"
       ;;
     --context|-c)
       add_context_dir "$2" || exit 1
@@ -1476,7 +1502,7 @@ fi
 
 # Wizard mode: ask everything interactively (profile, image, Tailscale)
 if [[ "$WIZARD_BATCH" == true ]]; then
-  run_wizard_batch
+  run_wizard_batch "$WIZARD_BATCH_ANSWER"
 elif [[ "$WIZARD" == true ]]; then
   run_wizard
 fi

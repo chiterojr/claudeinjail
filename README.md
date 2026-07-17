@@ -65,7 +65,7 @@ claudeinjail [command] [options]
 | Option | Description |
 |---|---|
 | `-w, --wizard` | Interactive mode: ask everything through guided prompts (profile, image, context directories, resume, Tailscale) instead of remembering individual flags |
-| `-ww, --wizard-batch` | Batch wizard: show every wizard step at once and read all answers from a single line, positional and `;`-separated. Omitted fields fall back to their default; only the profile is required. Order: `profile;image;contexts;resume;tailscale;exit-node` (contexts comma-separated) |
+| `-ww, --wizard-batch [answer]` | Batch wizard: show every wizard step at once and read all answers from a single line, positional and `;`-separated. Omitted fields fall back to their default; only the profile is required. Order: `profile;image;contexts;resume;tailscale;exit-node` (contexts comma-separated). Pass the answer inline to skip the prompt entirely, e.g. `-ww "2;4"` or `--wizard-batch="2;4"` (quote it — `;` is a shell separator) |
 | `-c, --context <dir>` | Mount a host directory read-only at `/context/<dir-name>`. Repeatable; each must exist and have a unique base name |
 | `-p, --profile <name>` | Use a specific profile |
 | `-i, --select-image` | Prompt to choose an image (4 built-in bases + any ejected custom images) |
@@ -83,6 +83,7 @@ claudeinjail [command] [options]
 claudeinjail                              # Start with default profile (Alpine)
 claudeinjail -w                           # Interactive wizard (asks everything)
 claudeinjail -ww                          # Batch wizard (all answers in one line)
+claudeinjail -ww "2;4"                     # Batch wizard inline (profile 2, image 4)
 claudeinjail -c ~/docs -c ../shared-lib   # Mount dirs at /context/docs, /context/shared-lib
 claudeinjail -p work                      # Start with the "work" profile
 claudeinjail -i                           # Choose base image interactively
@@ -140,6 +141,23 @@ profile is required. For example, with two profiles listed:
 selects profile 2, the Alpine+Node image, mounts the two context directories,
 skips resume, and connects to Tailscale. `2` on its own is enough — everything
 else falls back to its default.
+
+##### Inline answer (no prompt)
+
+Pass the answer straight on the command line to skip the interactive prompt
+entirely — handy for scripts and aliases. Quote it, since `;` is a shell
+command separator:
+
+```bash
+claudeinjail -ww "2;4"              # profile 2, image 4 (Debian+Node)
+claudeinjail --wizard-batch="2;4"   # same, long form
+claudeinjail -ww "2"                # profile 2, everything else default
+claudeinjail -ww "1;3" -s           # inline answer + a regular flag (opens a shell)
+```
+
+The same positional rules apply; only the profile field is required. When the
+answer is given inline the wizard prints nothing and starts the container
+directly.
 
 ### Context directories
 
